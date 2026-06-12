@@ -17,6 +17,8 @@ Endpoints to replicate are:
   - Stub variants:
     - LargeProducer
     - ComplianceScheme
+- /admin/health
+  - A simple GET endpoint that returns 200
 
 ### [epr-backend-account-microservice](https://github.com/DEFRA/epr-backend-account-microservice)
 
@@ -35,6 +37,8 @@ Endpoints to replicate are:
   - Do not use `@organisationExternalId` for the seeded `CS` person-emails lookup. That value belongs to `Organisations.ExternalId`, while the upstream `CS` query filters on `ComplianceSchemes.ExternalId`
 - /api/users/user-organisations?userId={userId}
   - User IDs should be taken from the epr-local-environment seeded users
+- /admin/health
+  - A simple GET endpoint that returns 200
 
 ## Replicating stub endpoints
 
