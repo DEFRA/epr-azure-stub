@@ -1,94 +1,51 @@
 # epr-azure-stub
 
-Core delivery C# ASP.NET backend template.
+Stub endpoints for EPR services that currently run in Azure and are needed by services running in CDP.
 
-* [Install MongoDB](#install-mongodb)
-* [Inspect MongoDB](#inspect-mongodb)
-* [Testing](#testing)
-* [Running](#running)
-* [Dependabot](#dependabot)
+- [Project structure](#project-structure)
+- [Running](#running)
+- [Testing](#testing)
+- [Docker Compose](#docker-compose)
 
+## Project structure
 
-### Docker Compose
+This is a .NET 10 ASP.NET Core minimal API.
 
-A Docker Compose template is in [compose.yml](compose.yml).
+- `EprAzureStub/Program.cs` configures the application, maps `/health`, and registers stub endpoints with `app.MapEndpoints()`.
+- `EprAzureStub/Endpoints.cs` contains top-level endpoint registration, with route groups organised by upstream service.
+- `EprAzureStub.Test` contains the test project for endpoint coverage.
 
-A local environment with:
+## Running
 
-- Localstack for AWS services (S3, SQS)
-- Redis
-- MongoDB
-- This service.
-- A commented out frontend example.
+```bash
+dotnet run --project EprAzureStub --launch-profile EprAzureStub
+```
+
+The local launch profile listens on `http://localhost:8085`.
+
+The health check endpoint is available at:
+
+```text
+GET /health
+```
+
+## Testing
+
+Run the full test suite with:
+
+```bash
+dotnet test
+```
+
+## Docker Compose
+
+A Docker Compose setup is available in [compose.yml](compose.yml).
+
+It builds and runs this service on port `8085`, alongside local supporting services defined in the compose file.
 
 ```bash
 docker compose up --build -d
 ```
-
-A more extensive setup is available in [github.com/DEFRA/cdp-local-environment](https://github.com/DEFRA/cdp-local-environment)
-
-### MongoDB
-
-#### MongoDB via Docker
-
-See above.
-
-```
-docker compose up -d mongodb
-```
-
-#### MongoDB locally
-
-Alternatively install MongoDB locally:
-
-- Install [MongoDB](https://www.mongodb.com/docs/manual/tutorial/#installation) on your local machine
-- Start MongoDB:
-```bash
-sudo mongod --dbpath ~/mongodb-cdp
-```
-
-#### MongoDB in CDP environments
-
-In CDP environments a MongoDB instance is already set up
-and the credentials exposed as enviromment variables.
-
-
-### Inspect MongoDB
-
-To inspect the Database and Collections locally:
-```bash
-mongosh
-```
-
-You can use the CDP Terminal to access the environments' MongoDB.
-
-### Testing
-
-Run the tests with:
-
-Tests run by running a full `WebApplication` backed by [Ephemeral MongoDB](https://github.com/asimmon/ephemeral-mongo).
-Tests do not use mocking of any sort and read and write from the in-memory database.
-
-```bash
-dotnet test
-````
-
-### Running
-
-Run CDP-Deployments application:
-```bash
-dotnet run --project EprAzureStub --launch-profile Development
-```
-
-### SonarCloud
-
-Example SonarCloud configuration are available in the GitHub Action workflows.
-
-### Dependabot
-
-We have added an example dependabot configuration file to the repository. You can enable it by renaming
-the [.github/example.dependabot.yml](.github/example.dependabot.yml) to `.github/dependabot.yml`
-
 
 ### About the licence
 

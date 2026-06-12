@@ -28,7 +28,6 @@ Endpoints to replicate are:
     - LargeProducer where `entityTypeCode=DR`
     - ComplianceScheme where `entityTypeCode=CS`
 
-
 ## Replicating stub endpoints
 
 1. Confirm the required repositories exist in the parent folder before starting:
@@ -44,6 +43,21 @@ Endpoints to replicate are:
    - Example: `/epr-backend-account-microservice/api/organisations/person-emails?...`
 6. Ensure you understand each endpoint and how it functions before implementing the stub.
 
+## Project implementation guidance
+
+- This repository is a .NET 10 ASP.NET Core minimal API.
+- Keep `EprAzureStub/Endpoints.cs` as the top-level endpoint registration entry point using the `MapEndpoints` extension method.
+- Give each upstream service being stubbed its own endpoint extension method, for example `MapEprPrnCommonBackendEndpoints` or `MapEprBackendAccountMicroserviceEndpoints`.
+- Keep `EprAzureStub/Program.cs` focused on application setup, such as services, health checks, middleware, and endpoint registration.
+- Preserve the existing `/health` endpoint.
+- Use minimal API route groups for upstream service prefixes, then map service-local endpoint paths inside the group.
+  - Example: `var group = app.MapGroup("/epr-prn-common-backend"); group.MapGet("/api/v1/prn/obligationcalculation/{year}", ...)`
+- Stub routes should return deterministic responses based on request path, headers, and query parameters.
+- Prefer simple minimal API handlers unless the endpoint logic becomes large enough to justify extracting private helper methods or small response models.
+- Use nullable-aware C# and keep response DTOs explicit when they make the stub response shape easier to understand.
+- Add or update tests in `EprAzureStub.Test` for each stub variant added.
+- Tests should exercise the HTTP surface using `Microsoft.AspNetCore.Mvc.Testing`, including expected status codes, required headers/query parameters, and response body shape.
+- Run `dotnet test` before considering endpoint work complete.
 
 ## Supporting repository references
 
