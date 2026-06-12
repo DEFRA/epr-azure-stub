@@ -134,6 +134,127 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     }
 
     [Fact]
+    public async Task GetPersonEmails_ReturnsSeededDirectProducerResponse()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.SeededDirectProducerOrganisation}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<List<PersonEmailResponseModel>>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(3, body.Count);
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "Direct"
+                && person.LastName == "Producer"
+                && person.Email == "test+directproducer@ee.com"
+        );
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "SB FirstName"
+                && person.LastName == "SB LastName"
+                && person.Email == "bmmmdmgz@sharklasers.com"
+        );
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "Francis"
+                && person.LastName == "Chelladurai"
+                && person.Email == "francis.chelladurai+31032026@equalexperts.com"
+        );
+    }
+
+    [Fact]
+    public async Task GetPersonEmails_ReturnsSeededComplianceSchemeResponse()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.SeededComplianceSchemeExternalId}&entityTypeCode={EntityTypeCodes.ComplianceScheme}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<List<PersonEmailResponseModel>>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(3, body.Count);
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "First name"
+                && person.LastName == "Last Name"
+                && person.Email == "test+17122025143216@ee.com"
+        );
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "Francis"
+                && person.LastName == "Delegated"
+                && person.Email == "francis.chelladurai+07042026@equalexperts.com"
+        );
+        Assert.Contains(
+            body,
+            person =>
+                person.FirstName == "Francis"
+                && person.LastName == "Basic"
+                && person.Email == "francis.chelladurai+260407@equalexperts.com"
+        );
+    }
+
+    [Theory]
+    [InlineData(
+        WasteOrganisationStubIds.SeededDirectProducerOrganisation,
+        EntityTypeCodes.ComplianceScheme
+    )]
+    [InlineData(
+        WasteOrganisationStubIds.SeededComplianceSchemeExternalId,
+        EntityTypeCodes.DirectRegistrant
+    )]
+    [InlineData(
+        WasteOrganisationStubIds.SeededComplianceSchemeOrganisation,
+        EntityTypeCodes.ComplianceScheme
+    )]
+    public async Task GetPersonEmails_ReturnsNoContent_WhenSeededOrganisationAndEntityTypeAreMismatched(
+        string organisationId,
+        string entityTypeCode
+    )
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{PersonEmailsEndpoint}?organisationId={organisationId}&entityTypeCode={entityTypeCode}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetPersonEmails_MatchesSeededEntityTypeCodeCaseInsensitively()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.SeededComplianceSchemeExternalId}&entityTypeCode=cs",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetUserOrganisations_ReturnsApprovedComplianceSchemeUserResponse()
     {
         using var client = factory.CreateClient();

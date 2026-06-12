@@ -23,10 +23,16 @@ Endpoints to replicate are:
 Endpoints to replicate are:
 
 - /api/organisations/person-emails?organisationId={organisationId}&entityTypeCode={entityTypeCode}
-  - Resolve organisation labels to IDs using the `waste-organisations-stub` section below and use the resolved ID as the `organisationId` query parameter
+  - Resolve organisation labels to IDs using the endpoint-specific lookup behaviour below and use the resolved ID as the `organisationId` query parameter
+  - For `entityTypeCode=DR`, `organisationId` is matched against `Organisations.ExternalId`
+  - For `entityTypeCode=CS`, `organisationId` is matched against `ComplianceSchemes.ExternalId`, not `Organisations.ExternalId`
+  - Source logic: [`OrganisationService.GetPersonEmails`](https://github.com/DEFRA/epr-backend-account-microservice/blob/main/src/BackendAccountService.Core/Services/OrganisationService.cs#L990-L1027)
   - Stub variants:
     - LargeProducer where `entityTypeCode=DR`
     - ComplianceScheme where `entityTypeCode=CS`
+    - Seeded direct producer where `entityTypeCode=DR`, using `@dpOrgExternalId` from the epr-local-environment seed data
+    - Seeded compliance scheme where `entityTypeCode=CS`, using `@complianceSchemeExternalId` from the epr-local-environment seed data
+  - Do not use `@organisationExternalId` for the seeded `CS` person-emails lookup. That value belongs to `Organisations.ExternalId`, while the upstream `CS` query filters on `ComplianceSchemes.ExternalId`
 - /api/users/user-organisations?userId={userId}
   - User IDs should be taken from the epr-local-environment seeded users
 
@@ -86,6 +92,8 @@ Endpoints to replicate are:
 - See [README.md](../epr-local-environment/README.md) for seeded users
   - The user definitions we need in this stub should be generated from the seeded users
   - The referenced [seed.sql](../epr-local-environment/compose/epr-backend-account-microservice-migrations/seed.sql) contains the definition for each user and we should use that data in the response data of this stub
+  - For `/api/organisations/person-emails`, use `@dpOrgExternalId` for `entityTypeCode=DR` and `@complianceSchemeExternalId` for `entityTypeCode=CS`
+  - `@organisationExternalId` can be used for seeded organisation details in `/api/users/user-organisations`, but should not be used as the seeded `CS` lookup ID for `/api/organisations/person-emails`
   - Ensure you can read and understand what users are being seeded
 
 ### [waste-obligations-perf-tests](https://github.com/DEFRA/waste-obligations-perf-tests)

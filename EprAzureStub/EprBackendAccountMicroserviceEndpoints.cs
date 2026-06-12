@@ -33,6 +33,22 @@ public static class EprBackendAccountMicroserviceEndpoints
                     return Results.Ok(CreateComplianceSchemePersonEmailsResponse());
                 }
 
+                if (
+                    organisationId == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.DirectRegistrant)
+                )
+                {
+                    return Results.Ok(CreateSeededDirectProducerPersonEmailsResponse());
+                }
+
+                if (
+                    organisationId == WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.ComplianceScheme)
+                )
+                {
+                    return Results.Ok(CreateSeededComplianceSchemePersonEmailsResponse());
+                }
+
                 return Results.NoContent();
             }
         );
@@ -75,6 +91,56 @@ public static class EprBackendAccountMicroserviceEndpoints
                 FirstName = "Compliance",
                 LastName = "Scheme",
                 Email = "compliance.scheme@example.com",
+            },
+        ];
+    }
+
+    private static IReadOnlyList<PersonEmailResponseModel> CreateSeededDirectProducerPersonEmailsResponse()
+    {
+        return
+        [
+            new()
+            {
+                FirstName = "Direct",
+                LastName = "Producer",
+                Email = "test+directproducer@ee.com",
+            },
+            new()
+            {
+                FirstName = "SB FirstName",
+                LastName = "SB LastName",
+                Email = "bmmmdmgz@sharklasers.com",
+            },
+            new()
+            {
+                FirstName = "Francis",
+                LastName = "Chelladurai",
+                Email = "francis.chelladurai+31032026@equalexperts.com",
+            },
+        ];
+    }
+
+    private static IReadOnlyList<PersonEmailResponseModel> CreateSeededComplianceSchemePersonEmailsResponse()
+    {
+        return
+        [
+            new()
+            {
+                FirstName = "First name",
+                LastName = "Last Name",
+                Email = "test+17122025143216@ee.com",
+            },
+            new()
+            {
+                FirstName = "Francis",
+                LastName = "Delegated",
+                Email = "francis.chelladurai+07042026@equalexperts.com",
+            },
+            new()
+            {
+                FirstName = "Francis",
+                LastName = "Basic",
+                Email = "francis.chelladurai+260407@equalexperts.com",
             },
         ];
     }
