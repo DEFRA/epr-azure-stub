@@ -69,6 +69,98 @@ public static class EprBackendAccountMicroserviceEndpoints
         return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
     }
 
+    private const string AdminRole = "Admin";
+    private const string ApprovedEnrolmentStatus = "Approved";
+    private const string DirectorJobTitle = "Director";
+    private const string EprPackagingService = "EPR Packaging";
+    private const string LimitedCompanyOrganisationType = "Limited Company";
+
+    private static readonly SeededOrganisation SeededComplianceSchemeOrganisation = new(
+        WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
+        "Organisation Name",
+        "Trading Name",
+        "Compliance Scheme",
+        "1",
+        "12345678"
+    );
+
+    private static readonly SeededOrganisation SeededDirectProducerOrganisation = new(
+        WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid,
+        "POP QUEST LTD",
+        string.Empty,
+        "Producer",
+        "165282",
+        "17121895"
+    );
+
+    private static readonly IReadOnlyList<SeededUser> SeededComplianceSchemeUsers =
+    [
+        new(
+            Guid.Parse("579c319d-d552-47a2-bf4c-5a125a3183bc"),
+            "First name",
+            "Last Name",
+            "test+17122025143216@ee.com",
+            "07123456789",
+            ServiceRoles.ApprovedPerson,
+            1,
+            SeededComplianceSchemeOrganisation
+        ),
+        new(
+            Guid.Parse("ef2fd2a5-24bf-4b22-89a0-17a0367aee1c"),
+            "Francis",
+            "Delegated",
+            "francis.chelladurai+07042026@equalexperts.com",
+            "00441234567892",
+            ServiceRoles.DelegatedPerson,
+            2,
+            SeededComplianceSchemeOrganisation
+        ),
+        new(
+            Guid.Parse("13e26b8a-e2b2-4870-b040-d6bdf5d689fa"),
+            "Francis",
+            "Basic",
+            "francis.chelladurai+260407@equalexperts.com",
+            "00441234567893",
+            ServiceRoles.BasicUser,
+            3,
+            SeededComplianceSchemeOrganisation
+        ),
+    ];
+
+    private static readonly IReadOnlyList<SeededUser> SeededDirectProducerUsers =
+    [
+        new(
+            Guid.Parse("79d0deab-c22d-4c30-8082-508ff8dc1bd7"),
+            "Direct",
+            "Producer",
+            "test+directproducer@ee.com",
+            "07123456780",
+            ServiceRoles.ApprovedPerson,
+            1,
+            SeededDirectProducerOrganisation
+        ),
+        new(
+            Guid.Parse("513a78ee-d5bf-4fa4-9d8f-136550ea6072"),
+            "SB FirstName",
+            "SB LastName",
+            "bmmmdmgz@sharklasers.com",
+            "00441234567890",
+            ServiceRoles.DelegatedPerson,
+            2,
+            SeededDirectProducerOrganisation
+        ),
+        new(
+            Guid.Parse("d062d4fe-34f8-468e-ada8-d950cc9a3c2a"),
+            "Francis",
+            "Chelladurai",
+            "francis.chelladurai+31032026@equalexperts.com",
+            "00441234567891",
+            ServiceRoles.BasicUser,
+            3,
+            SeededDirectProducerOrganisation
+        ),
+    ];
+
     private static IReadOnlyList<PersonEmailResponseModel> CreateLargeProducerPersonEmailsResponse()
     {
         return
@@ -97,177 +189,75 @@ public static class EprBackendAccountMicroserviceEndpoints
 
     private static IReadOnlyList<PersonEmailResponseModel> CreateSeededDirectProducerPersonEmailsResponse()
     {
-        return
-        [
-            new()
-            {
-                FirstName = "Direct",
-                LastName = "Producer",
-                Email = "test+directproducer@ee.com",
-            },
-            new()
-            {
-                FirstName = "SB FirstName",
-                LastName = "SB LastName",
-                Email = "bmmmdmgz@sharklasers.com",
-            },
-            new()
-            {
-                FirstName = "Francis",
-                LastName = "Chelladurai",
-                Email = "francis.chelladurai+31032026@equalexperts.com",
-            },
-        ];
+        return CreatePersonEmailsResponse(SeededDirectProducerUsers);
     }
 
     private static IReadOnlyList<PersonEmailResponseModel> CreateSeededComplianceSchemePersonEmailsResponse()
     {
-        return
-        [
-            new()
+        return CreatePersonEmailsResponse(SeededComplianceSchemeUsers);
+    }
+
+    private static IReadOnlyList<PersonEmailResponseModel> CreatePersonEmailsResponse(
+        IReadOnlyList<SeededUser> seededUsers
+    )
+    {
+        return seededUsers
+            .Select(user => new PersonEmailResponseModel
             {
-                FirstName = "First name",
-                LastName = "Last Name",
-                Email = "test+17122025143216@ee.com",
-            },
-            new()
-            {
-                FirstName = "Francis",
-                LastName = "Delegated",
-                Email = "francis.chelladurai+07042026@equalexperts.com",
-            },
-            new()
-            {
-                FirstName = "Francis",
-                LastName = "Basic",
-                Email = "francis.chelladurai+260407@equalexperts.com",
-            },
-        ];
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Email = user.Email,
+            })
+            .ToList();
     }
 
     private static UserOrganisationsListModel? CreateUserOrganisationsResponse(Guid userId)
     {
-        return userId.ToString().ToLowerInvariant() switch
+        var seededUser = FindSeededUser(userId);
+
+        return seededUser is null ? null : CreateUserOrganisationsResponse(seededUser);
+    }
+
+    private static SeededUser? FindSeededUser(Guid userId)
+    {
+        foreach (var seededUser in SeededComplianceSchemeUsers)
         {
-            "579c319d-d552-47a2-bf4c-5a125a3183bc" => CreateSeededComplianceSchemeUserResponse(
-                userId,
-                "First name",
-                "Last Name",
-                "test+17122025143216@ee.com",
-                ServiceRoles.ApprovedPerson,
-                1
-            ),
-            "79d0deab-c22d-4c30-8082-508ff8dc1bd7" => CreateSeededDirectProducerUserResponse(
-                userId,
-                "Direct",
-                "Producer",
-                "test+directproducer@ee.com",
-                ServiceRoles.ApprovedPerson,
-                1
-            ),
-            "513a78ee-d5bf-4fa4-9d8f-136550ea6072" => CreateSeededDirectProducerUserResponse(
-                userId,
-                "SB FirstName",
-                "SB LastName",
-                "bmmmdmgz@sharklasers.com",
-                ServiceRoles.DelegatedPerson,
-                2
-            ),
-            "d062d4fe-34f8-468e-ada8-d950cc9a3c2a" => CreateSeededDirectProducerUserResponse(
-                userId,
-                "Francis",
-                "Chelladurai",
-                "francis.chelladurai+31032026@equalexperts.com",
-                ServiceRoles.BasicUser,
-                3
-            ),
-            "ef2fd2a5-24bf-4b22-89a0-17a0367aee1c" => CreateSeededComplianceSchemeUserResponse(
-                userId,
-                "Francis",
-                "Delegated",
-                "francis.chelladurai+07042026@equalexperts.com",
-                ServiceRoles.DelegatedPerson,
-                2
-            ),
-            "13e26b8a-e2b2-4870-b040-d6bdf5d689fa" => CreateSeededComplianceSchemeUserResponse(
-                userId,
-                "Francis",
-                "Basic",
-                "francis.chelladurai+260407@equalexperts.com",
-                ServiceRoles.BasicUser,
-                3
-            ),
-            _ => null,
-        };
+            if (seededUser.UserId == userId)
+            {
+                return seededUser;
+            }
+        }
+
+        foreach (var seededUser in SeededDirectProducerUsers)
+        {
+            if (seededUser.UserId == userId)
+            {
+                return seededUser;
+            }
+        }
+
+        return null;
     }
 
-    private static UserOrganisationsListModel CreateSeededComplianceSchemeUserResponse(
-        Guid userId,
-        string firstName,
-        string lastName,
-        string email,
-        string serviceRole,
-        int serviceRoleId
-    )
+    private static UserOrganisationsListModel CreateUserOrganisationsResponse(SeededUser seededUser)
     {
-        return CreateUserOrganisationsResponse(
-            userId,
-            firstName,
-            lastName,
-            email,
-            serviceRole,
-            serviceRoleId,
-            CreateSeededComplianceSchemeOrganisation()
-        );
-    }
+        var organisation = CreateOrganisationDetail(seededUser.Organisation);
 
-    private static UserOrganisationsListModel CreateSeededDirectProducerUserResponse(
-        Guid userId,
-        string firstName,
-        string lastName,
-        string email,
-        string serviceRole,
-        int serviceRoleId
-    )
-    {
-        return CreateUserOrganisationsResponse(
-            userId,
-            firstName,
-            lastName,
-            email,
-            serviceRole,
-            serviceRoleId,
-            CreateSeededDirectProducerOrganisation()
-        );
-    }
-
-    private static UserOrganisationsListModel CreateUserOrganisationsResponse(
-        Guid userId,
-        string firstName,
-        string lastName,
-        string email,
-        string serviceRole,
-        int serviceRoleId,
-        OrganisationDetailModel organisation
-    )
-    {
         return new()
         {
             User = new()
             {
-                Id = userId,
-                FirstName = firstName,
-                LastName = lastName,
-                Email = email,
-                RoleInOrganisation = "Admin",
-                EnrolmentStatus = "Approved",
-                ServiceRole = serviceRole,
-                Service = "EPR Packaging",
-                ServiceRoleId = serviceRoleId,
-                Telephone = organisation.OrganisationRole == "Producer"
-                    ? GetDirectProducerTelephone(serviceRole)
-                    : GetComplianceSchemeTelephone(serviceRole),
-                JobTitle = "Director",
+                Id = seededUser.UserId,
+                FirstName = seededUser.FirstName,
+                LastName = seededUser.LastName,
+                Email = seededUser.Email,
+                RoleInOrganisation = AdminRole,
+                EnrolmentStatus = ApprovedEnrolmentStatus,
+                ServiceRole = seededUser.ServiceRole,
+                Service = EprPackagingService,
+                ServiceRoleId = seededUser.ServiceRoleId,
+                Telephone = seededUser.Telephone,
+                JobTitle = DirectorJobTitle,
                 IsChangeRequestPending = false,
                 NumberOfOrganisations = 1,
                 Organisations = [organisation],
@@ -275,71 +265,47 @@ public static class EprBackendAccountMicroserviceEndpoints
         };
     }
 
-    private static string GetDirectProducerTelephone(string serviceRole)
-    {
-        return serviceRole switch
-        {
-            ServiceRoles.ApprovedPerson => "07123456780",
-            ServiceRoles.DelegatedPerson => "00441234567890",
-            ServiceRoles.BasicUser => "00441234567891",
-            _ => string.Empty,
-        };
-    }
-
-    private static string GetComplianceSchemeTelephone(string serviceRole)
-    {
-        return serviceRole switch
-        {
-            ServiceRoles.ApprovedPerson => "07123456789",
-            ServiceRoles.DelegatedPerson => "00441234567892",
-            ServiceRoles.BasicUser => "00441234567893",
-            _ => string.Empty,
-        };
-    }
-
-    private static OrganisationDetailModel CreateSeededComplianceSchemeOrganisation()
+    private static OrganisationDetailModel CreateOrganisationDetail(SeededOrganisation seededOrganisation)
     {
         return new()
         {
-            Id = WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-            Name = "Organisation Name",
-            TradingName = "Trading Name",
-            OrganisationRole = "Compliance Scheme",
-            OrganisationType = "Limited Company",
-            OrganisationNumber = "1",
-            CompaniesHouseNumber = "12345678",
+            Id = seededOrganisation.Id,
+            Name = seededOrganisation.Name,
+            TradingName = seededOrganisation.TradingName,
+            OrganisationRole = seededOrganisation.OrganisationRole,
+            OrganisationType = LimitedCompanyOrganisationType,
+            OrganisationNumber = seededOrganisation.OrganisationNumber,
+            CompaniesHouseNumber = seededOrganisation.CompaniesHouseNumber,
             ProducerType = string.Empty,
             NationId = 1,
             Town = string.Empty,
             County = string.Empty,
             Country = string.Empty,
             Postcode = string.Empty,
-            PersonRoleInOrganisation = "Admin",
+            PersonRoleInOrganisation = AdminRole,
             IsChangeRequestPending = false,
         };
     }
 
-    private static OrganisationDetailModel CreateSeededDirectProducerOrganisation()
-    {
-        return new()
-        {
-            Id = WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid,
-            Name = "POP QUEST LTD",
-            TradingName = string.Empty,
-            OrganisationRole = "Producer",
-            OrganisationType = "Limited Company",
-            OrganisationNumber = "165282",
-            CompaniesHouseNumber = "17121895",
-            ProducerType = string.Empty,
-            NationId = 1,
-            Town = string.Empty,
-            County = string.Empty,
-            Country = string.Empty,
-            Postcode = string.Empty,
-            PersonRoleInOrganisation = "Admin",
-            IsChangeRequestPending = false,
-        };
-    }
+    private sealed record SeededUser(
+        Guid UserId,
+        string FirstName,
+        string LastName,
+        string Email,
+        string Telephone,
+        string ServiceRole,
+        int ServiceRoleId,
+        SeededOrganisation Organisation
+    );
+
+    private sealed record SeededOrganisation(
+        Guid Id,
+        string Name,
+        string TradingName,
+        string OrganisationRole,
+        string OrganisationNumber,
+        string CompaniesHouseNumber
+    );
 
     private sealed record PersonEmailResponseModel
     {
