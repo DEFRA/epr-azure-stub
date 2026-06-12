@@ -8,6 +8,8 @@ public static class EprBackendAccountMicroserviceEndpoints
     {
         var group = app.MapGroup("/epr-backend-account-microservice");
 
+        group.MapGet("/admin/health", () => Results.Ok());
+
         group.MapGet(
             "/api/organisations/person-emails",
             ([FromQuery] Guid organisationId, [FromQuery] string? entityTypeCode) =>

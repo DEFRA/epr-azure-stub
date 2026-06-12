@@ -12,6 +12,8 @@ public static class EprPrnCommonBackendEndpoints
     {
         var group = app.MapGroup("/epr-prn-common-backend");
 
+        group.MapGet("/admin/health", () => Results.Ok());
+
         group.MapGet(
             "/api/v1/prn/obligationcalculation/{year:int}",
             (int year, [FromHeader(Name = OrganisationHeader)] Guid? organisationId) =>

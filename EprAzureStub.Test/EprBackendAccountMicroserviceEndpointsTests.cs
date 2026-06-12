@@ -15,6 +15,19 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         "/epr-backend-account-microservice/api/users/user-organisations";
 
     [Fact]
+    public async Task GetAdminHealth_ReturnsOk()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/epr-backend-account-microservice/admin/health",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetPersonEmails_ReturnsLargeProducerResponse()
     {
         using var client = factory.CreateClient();

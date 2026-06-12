@@ -12,6 +12,19 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
     private const string OrganisationHeader = "X-EPR-ORGANISATION";
 
     [Fact]
+    public async Task GetAdminHealth_ReturnsOk()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            "/epr-prn-common-backend/admin/health",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetObligationCalculation_ReturnsLargeProducerResponse()
     {
         using var client = factory.CreateClient();
