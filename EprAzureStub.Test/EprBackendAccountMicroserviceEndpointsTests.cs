@@ -8,8 +8,11 @@ namespace EprAzureStub.Test;
 public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<Program> factory)
     : IClassFixture<WebApplicationFactory<Program>>
 {
-    private const string Endpoint =
+    private const string PersonEmailsEndpoint =
         "/epr-backend-account-microservice/api/organisations/person-emails";
+
+    private const string UserOrganisationsEndpoint =
+        "/epr-backend-account-microservice/api/users/user-organisations";
 
     [Fact]
     public async Task GetPersonEmails_ReturnsLargeProducerResponse()
@@ -17,7 +20,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -39,7 +42,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.ComplianceScheme}&entityTypeCode={EntityTypeCodes.ComplianceScheme}",
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.ComplianceScheme}&entityTypeCode={EntityTypeCodes.ComplianceScheme}",
             TestContext.Current.CancellationToken
         );
 
@@ -61,7 +64,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={Guid.Empty}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
+            $"{PersonEmailsEndpoint}?organisationId={Guid.Empty}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -74,7 +77,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={Guid.NewGuid()}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
+            $"{PersonEmailsEndpoint}?organisationId={Guid.NewGuid()}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -92,7 +95,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={organisationId}&entityTypeCode={entityTypeCode}",
+            $"{PersonEmailsEndpoint}?organisationId={organisationId}&entityTypeCode={entityTypeCode}",
             TestContext.Current.CancellationToken
         );
 
@@ -110,7 +113,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         var separator = string.IsNullOrEmpty(queryString) ? string.Empty : "&";
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}{separator}{queryString}",
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}{separator}{queryString}",
             TestContext.Current.CancellationToken
         );
 
@@ -123,11 +126,206 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode=dr",
+            $"{PersonEmailsEndpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode=dr",
             TestContext.Current.CancellationToken
         );
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsApprovedComplianceSchemeUserResponse()
+    {
+        using var client = factory.CreateClient();
+        var userId = Guid.Parse("579c319d-d552-47a2-bf4c-5a125a3183bc");
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId={userId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(userId, body.User.Id);
+        Assert.Equal("First name", body.User.FirstName);
+        Assert.Equal("Last Name", body.User.LastName);
+        Assert.Equal("test+17122025143216@ee.com", body.User.Email);
+        Assert.Equal("Approved Person", body.User.ServiceRole);
+        Assert.Equal("EPR Packaging", body.User.Service);
+        Assert.Equal(1, body.User.ServiceRoleId);
+        Assert.Equal(1, body.User.NumberOfOrganisations);
+        var organisation = Assert.Single(body.User.Organisations);
+        Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, organisation.Id);
+        Assert.Equal("Organisation Name", organisation.Name);
+        Assert.Equal("Trading Name", organisation.TradingName);
+        Assert.Equal("Compliance Scheme", organisation.OrganisationRole);
+        Assert.Equal("1", organisation.OrganisationNumber);
+        Assert.Equal("12345678", organisation.CompaniesHouseNumber);
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsApprovedDirectProducerUserResponse()
+    {
+        using var client = factory.CreateClient();
+        var userId = Guid.Parse("79d0deab-c22d-4c30-8082-508ff8dc1bd7");
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId={userId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(userId, body.User.Id);
+        Assert.Equal("Direct", body.User.FirstName);
+        Assert.Equal("Producer", body.User.LastName);
+        Assert.Equal("test+directproducer@ee.com", body.User.Email);
+        Assert.Equal("Approved Person", body.User.ServiceRole);
+        Assert.Equal("EPR Packaging", body.User.Service);
+        Assert.Equal(1, body.User.ServiceRoleId);
+        var organisation = Assert.Single(body.User.Organisations);
+        Assert.Equal(WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid, organisation.Id);
+        Assert.Equal("POP QUEST LTD", organisation.Name);
+        Assert.Equal("Producer", organisation.OrganisationRole);
+        Assert.Equal("165282", organisation.OrganisationNumber);
+        Assert.Equal("17121895", organisation.CompaniesHouseNumber);
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsDelegatedDirectProducerUserResponse()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId=513a78ee-d5bf-4fa4-9d8f-136550ea6072",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal("SB FirstName", body.User.FirstName);
+        Assert.Equal("SB LastName", body.User.LastName);
+        Assert.Equal("bmmmdmgz@sharklasers.com", body.User.Email);
+        Assert.Equal("Delegated Person", body.User.ServiceRole);
+        Assert.Equal("EPR Packaging", body.User.Service);
+        Assert.Equal(2, body.User.ServiceRoleId);
+        Assert.Contains(
+            body.User.Organisations,
+            organisation =>
+                organisation.Id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
+                && organisation.OrganisationRole == "Producer"
+        );
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsBasicComplianceSchemeUserResponse()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId=13e26b8a-e2b2-4870-b040-d6bdf5d689fa",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal("Francis", body.User.FirstName);
+        Assert.Equal("Basic", body.User.LastName);
+        Assert.Equal("francis.chelladurai+260407@equalexperts.com", body.User.Email);
+        Assert.Equal("Basic User", body.User.ServiceRole);
+        Assert.Equal("EPR Packaging", body.User.Service);
+        Assert.Equal(3, body.User.ServiceRoleId);
+        Assert.Contains(
+            body.User.Organisations,
+            organisation =>
+                organisation.Id == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid
+                && organisation.OrganisationRole == "Compliance Scheme"
+        );
+    }
+
+    [Theory]
+    [InlineData(
+        "d062d4fe-34f8-468e-ada8-d950cc9a3c2a",
+        "Francis",
+        "Chelladurai",
+        "francis.chelladurai+31032026@equalexperts.com",
+        "Basic User"
+    )]
+    [InlineData(
+        "ef2fd2a5-24bf-4b22-89a0-17a0367aee1c",
+        "Francis",
+        "Delegated",
+        "francis.chelladurai+07042026@equalexperts.com",
+        "Delegated Person"
+    )]
+    public async Task GetUserOrganisations_ReturnsRemainingSeededUserResponses(
+        string userId,
+        string firstName,
+        string lastName,
+        string email,
+        string serviceRole
+    )
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId={userId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(firstName, body.User.FirstName);
+        Assert.Equal(lastName, body.User.LastName);
+        Assert.Equal(email, body.User.Email);
+        Assert.Equal(serviceRole, body.User.ServiceRole);
+        Assert.Equal("EPR Packaging", body.User.Service);
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsNotFound_WhenUserIdIsUnknown()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId={Guid.NewGuid()}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetUserOrganisations_ReturnsNotFound_WhenUserIdIsEmpty()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{UserOrganisationsEndpoint}?userId={Guid.Empty}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private sealed record PersonEmailResponseModel
@@ -137,5 +335,46 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         public string LastName { get; init; } = string.Empty;
 
         public string Email { get; init; } = string.Empty;
+    }
+
+    private sealed record UserOrganisationsListModel
+    {
+        public UserDetailsModel User { get; init; } = new();
+    }
+
+    private sealed record UserDetailsModel
+    {
+        public Guid Id { get; init; }
+
+        public string FirstName { get; init; } = string.Empty;
+
+        public string LastName { get; init; } = string.Empty;
+
+        public string Email { get; init; } = string.Empty;
+
+        public string ServiceRole { get; init; } = string.Empty;
+
+        public string Service { get; init; } = string.Empty;
+
+        public int ServiceRoleId { get; init; }
+
+        public int NumberOfOrganisations { get; init; }
+
+        public IReadOnlyList<OrganisationDetailModel> Organisations { get; init; } = [];
+    }
+
+    private sealed record OrganisationDetailModel
+    {
+        public Guid Id { get; init; }
+
+        public string Name { get; init; } = string.Empty;
+
+        public string TradingName { get; init; } = string.Empty;
+
+        public string OrganisationRole { get; init; } = string.Empty;
+
+        public string OrganisationNumber { get; init; } = string.Empty;
+
+        public string CompaniesHouseNumber { get; init; } = string.Empty;
     }
 }

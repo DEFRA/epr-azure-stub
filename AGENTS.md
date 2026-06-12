@@ -27,6 +27,8 @@ Endpoints to replicate are:
   - Stub variants:
     - LargeProducer where `entityTypeCode=DR`
     - ComplianceScheme where `entityTypeCode=CS`
+- /api/users/user-organisations?userId={userId}
+  - User IDs should be taken from the epr-local-environment seeded users
 
 ## Replicating stub endpoints
 
@@ -35,6 +37,7 @@ Endpoints to replicate are:
    - epr-backend-account-microservice
    - waste-organisations
    - waste-organisations-stub
+   - epr-local-environment
 2. Find each endpoint within the relevant source repository.
 3. Note the required stub variants and make sure you understand the request/response behaviour.
 4. Base the stub response structure on the real endpoint implementation.
@@ -73,3 +76,21 @@ Endpoints to replicate are:
 - Organisations of interest, keyed by organisation label:
   - LargeProducer - 9d3c4d0f-8e5a-4b91-9f7a-2e8d6a1c5f42
   - ComplianceScheme - c71b2e84-3f9d-47aa-a8c6-5b4ef0139d8e
+- Additional stub organisations should also be taken from the epr-local-environment seed data
+  - There should be a valid response, using the seed data, for each organisation found in [seed.sql](../epr-local-environment/compose/epr-backend-account-microservice-migrations/seed.sql)
+  - The organisation data used can be cross referenced with organisation data matching on organisation ID in [seed.sql](../epr-local-environment/compose/epr-common-data-api-migrations/seed.sql)
+
+### [epr-local-environment](https://github.com/DEFRA/epr-local-environment)
+
+- Full configuration of Azure and CDP services
+- See [README.md](../epr-local-environment/README.md) for seeded users
+  - The user definitions we need in this stub should be generated from the seeded users
+  - The referenced [seed.sql](../epr-local-environment/compose/epr-backend-account-microservice-migrations/seed.sql) contains the definition for each user and we should use that data in the response data of this stub
+  - Ensure you can read and understand what users are being seeded
+
+### [waste-obligations-perf-tests](https://github.com/DEFRA/waste-obligations-perf-tests)
+
+- Performance tests for waste-obligations service
+- See [config.js](../waste-obligations-perf-tests/scenarios-k6/lib/config.js) for `ORG_IDS`
+- All GUIDs should be noted in the waste-organisations-stub guidance above under `Organisations of interest`
+  - If there are any missing then please highlight
