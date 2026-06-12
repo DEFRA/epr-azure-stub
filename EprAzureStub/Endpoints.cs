@@ -8,5 +8,6 @@ public static class Endpoints
     public static void MapEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapEprPrnCommonBackendEndpoints();
+        app.MapEprBackendAccountMicroserviceEndpoints();
     }
 }
