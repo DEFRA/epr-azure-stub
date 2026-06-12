@@ -4,9 +4,6 @@ namespace EprAzureStub;
 
 public static class EprBackendAccountMicroserviceEndpoints
 {
-    private const string DirectRegistrantEntityTypeCode = "DR";
-    private const string ComplianceSchemeEntityTypeCode = "CS";
-
     public static void MapEprBackendAccountMicroserviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/epr-backend-account-microservice");
@@ -22,7 +19,7 @@ public static class EprBackendAccountMicroserviceEndpoints
 
                 if (
                     organisationId == WasteOrganisationStubIds.LargeProducerGuid
-                    && IsEntityTypeCode(entityTypeCode, DirectRegistrantEntityTypeCode)
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.DirectRegistrant)
                 )
                 {
                     return Results.Ok(CreateLargeProducerPersonEmailsResponse());
@@ -30,7 +27,7 @@ public static class EprBackendAccountMicroserviceEndpoints
 
                 if (
                     organisationId == WasteOrganisationStubIds.ComplianceSchemeGuid
-                    && IsEntityTypeCode(entityTypeCode, ComplianceSchemeEntityTypeCode)
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.ComplianceScheme)
                 )
                 {
                     return Results.Ok(CreateComplianceSchemePersonEmailsResponse());

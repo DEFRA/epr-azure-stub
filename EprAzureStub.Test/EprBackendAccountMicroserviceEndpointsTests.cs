@@ -17,7 +17,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode=DR",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -39,7 +39,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={WasteOrganisationStubIds.ComplianceScheme}&entityTypeCode=CS",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.ComplianceScheme}&entityTypeCode={EntityTypeCodes.ComplianceScheme}",
             TestContext.Current.CancellationToken
         );
 
@@ -61,7 +61,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={Guid.Empty}&entityTypeCode=DR",
+            $"{Endpoint}?organisationId={Guid.Empty}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -74,7 +74,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={Guid.NewGuid()}&entityTypeCode=DR",
+            $"{Endpoint}?organisationId={Guid.NewGuid()}&entityTypeCode={EntityTypeCodes.DirectRegistrant}",
             TestContext.Current.CancellationToken
         );
 
@@ -82,8 +82,8 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     }
 
     [Theory]
-    [InlineData(WasteOrganisationStubIds.LargeProducer, "CS")]
-    [InlineData(WasteOrganisationStubIds.ComplianceScheme, "DR")]
+    [InlineData(WasteOrganisationStubIds.LargeProducer, EntityTypeCodes.ComplianceScheme)]
+    [InlineData(WasteOrganisationStubIds.ComplianceScheme, EntityTypeCodes.DirectRegistrant)]
     public async Task GetPersonEmails_ReturnsNoContent_WhenOrganisationAndEntityTypeAreMismatched(
         string organisationId,
         string entityTypeCode
