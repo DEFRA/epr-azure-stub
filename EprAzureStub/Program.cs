@@ -9,3 +9,5 @@ var app = builder.Build();
 app.MapHealthChecks("/health");
 app.MapEndpoints();
 app.Run();
+
+public partial class Program;

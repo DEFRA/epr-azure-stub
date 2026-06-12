@@ -23,10 +23,18 @@ Endpoints to replicate are:
 Endpoints to replicate are:
 
 - /api/organisations/person-emails?organisationId={organisationId}&entityTypeCode={entityTypeCode}
-  - Resolve organisation labels to IDs using the `waste-organisations-stub` section below and use the resolved ID as the `organisationId` query parameter
+  - Resolve organisation labels to IDs using the endpoint-specific lookup behaviour below and use the resolved ID as the `organisationId` query parameter
+  - For `entityTypeCode=DR`, `organisationId` is matched against `Organisations.ExternalId`
+  - For `entityTypeCode=CS`, `organisationId` is matched against `ComplianceSchemes.ExternalId`, not `Organisations.ExternalId`
+  - Source logic: [`OrganisationService.GetPersonEmails`](https://github.com/DEFRA/epr-backend-account-microservice/blob/main/src/BackendAccountService.Core/Services/OrganisationService.cs#L990-L1027)
   - Stub variants:
     - LargeProducer where `entityTypeCode=DR`
     - ComplianceScheme where `entityTypeCode=CS`
+    - Seeded direct producer where `entityTypeCode=DR`, using `@dpOrgExternalId` from the epr-local-environment seed data
+    - Seeded compliance scheme where `entityTypeCode=CS`, using `@complianceSchemeExternalId` from the epr-local-environment seed data
+  - Do not use `@organisationExternalId` for the seeded `CS` person-emails lookup. That value belongs to `Organisations.ExternalId`, while the upstream `CS` query filters on `ComplianceSchemes.ExternalId`
+- /api/users/user-organisations?userId={userId}
+  - User IDs should be taken from the epr-local-environment seeded users
 
 ## Replicating stub endpoints
 
@@ -35,6 +43,7 @@ Endpoints to replicate are:
    - epr-backend-account-microservice
    - waste-organisations
    - waste-organisations-stub
+   - epr-local-environment
 2. Find each endpoint within the relevant source repository.
 3. Note the required stub variants and make sure you understand the request/response behaviour.
 4. Base the stub response structure on the real endpoint implementation.
@@ -73,3 +82,23 @@ Endpoints to replicate are:
 - Organisations of interest, keyed by organisation label:
   - LargeProducer - 9d3c4d0f-8e5a-4b91-9f7a-2e8d6a1c5f42
   - ComplianceScheme - c71b2e84-3f9d-47aa-a8c6-5b4ef0139d8e
+- Additional stub organisations should also be taken from the epr-local-environment seed data
+  - There should be a valid response, using the seed data, for each organisation found in [seed.sql](../epr-local-environment/compose/epr-backend-account-microservice-migrations/seed.sql)
+  - The organisation data used can be cross referenced with organisation data matching on organisation ID in [seed.sql](../epr-local-environment/compose/epr-common-data-api-migrations/seed.sql)
+
+### [epr-local-environment](https://github.com/DEFRA/epr-local-environment)
+
+- Full configuration of Azure and CDP services
+- See [README.md](../epr-local-environment/README.md) for seeded users
+  - The user definitions we need in this stub should be generated from the seeded users
+  - The referenced [seed.sql](../epr-local-environment/compose/epr-backend-account-microservice-migrations/seed.sql) contains the definition for each user and we should use that data in the response data of this stub
+  - For `/api/organisations/person-emails`, use `@dpOrgExternalId` for `entityTypeCode=DR` and `@complianceSchemeExternalId` for `entityTypeCode=CS`
+  - `@organisationExternalId` can be used for seeded organisation details in `/api/users/user-organisations`, but should not be used as the seeded `CS` lookup ID for `/api/organisations/person-emails`
+  - Ensure you can read and understand what users are being seeded
+
+### [waste-obligations-perf-tests](https://github.com/DEFRA/waste-obligations-perf-tests)
+
+- Performance tests for waste-obligations service
+- See [config.js](../waste-obligations-perf-tests/scenarios-k6/lib/config.js) for `ORG_IDS`
+- All GUIDs should be noted in the waste-organisations-stub guidance above under `Organisations of interest`
+  - If there are any missing then please highlight
