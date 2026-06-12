@@ -7,12 +7,6 @@ public static class EprBackendAccountMicroserviceEndpoints
     private const string DirectRegistrantEntityTypeCode = "DR";
     private const string ComplianceSchemeEntityTypeCode = "CS";
 
-    private static readonly Guid LargeProducerId =
-        Guid.Parse("9d3c4d0f-8e5a-4b91-9f7a-2e8d6a1c5f42");
-
-    private static readonly Guid ComplianceSchemeId =
-        Guid.Parse("c71b2e84-3f9d-47aa-a8c6-5b4ef0139d8e");
-
     public static void MapEprBackendAccountMicroserviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/epr-backend-account-microservice");
@@ -27,7 +21,7 @@ public static class EprBackendAccountMicroserviceEndpoints
                 }
 
                 if (
-                    organisationId == LargeProducerId
+                    organisationId == WasteOrganisationStubIds.LargeProducerGuid
                     && IsEntityTypeCode(entityTypeCode, DirectRegistrantEntityTypeCode)
                 )
                 {
@@ -35,7 +29,7 @@ public static class EprBackendAccountMicroserviceEndpoints
                 }
 
                 if (
-                    organisationId == ComplianceSchemeId
+                    organisationId == WasteOrganisationStubIds.ComplianceSchemeGuid
                     && IsEntityTypeCode(entityTypeCode, ComplianceSchemeEntityTypeCode)
                 )
                 {

@@ -11,16 +11,13 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     private const string Endpoint =
         "/epr-backend-account-microservice/api/organisations/person-emails";
 
-    private const string LargeProducerId = "9d3c4d0f-8e5a-4b91-9f7a-2e8d6a1c5f42";
-    private const string ComplianceSchemeId = "c71b2e84-3f9d-47aa-a8c6-5b4ef0139d8e";
-
     [Fact]
     public async Task GetPersonEmails_ReturnsLargeProducerResponse()
     {
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={LargeProducerId}&entityTypeCode=DR",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode=DR",
             TestContext.Current.CancellationToken
         );
 
@@ -42,7 +39,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={ComplianceSchemeId}&entityTypeCode=CS",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.ComplianceScheme}&entityTypeCode=CS",
             TestContext.Current.CancellationToken
         );
 
@@ -85,8 +82,8 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     }
 
     [Theory]
-    [InlineData(LargeProducerId, "CS")]
-    [InlineData(ComplianceSchemeId, "DR")]
+    [InlineData(WasteOrganisationStubIds.LargeProducer, "CS")]
+    [InlineData(WasteOrganisationStubIds.ComplianceScheme, "DR")]
     public async Task GetPersonEmails_ReturnsNoContent_WhenOrganisationAndEntityTypeAreMismatched(
         string organisationId,
         string entityTypeCode
@@ -113,7 +110,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         var separator = string.IsNullOrEmpty(queryString) ? string.Empty : "&";
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={LargeProducerId}{separator}{queryString}",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}{separator}{queryString}",
             TestContext.Current.CancellationToken
         );
 
@@ -126,7 +123,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync(
-            $"{Endpoint}?organisationId={LargeProducerId}&entityTypeCode=dr",
+            $"{Endpoint}?organisationId={WasteOrganisationStubIds.LargeProducer}&entityTypeCode=dr",
             TestContext.Current.CancellationToken
         );
 

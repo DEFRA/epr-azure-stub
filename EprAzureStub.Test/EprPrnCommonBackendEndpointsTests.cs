@@ -10,15 +10,13 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
 {
     private const string Endpoint = "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2025";
     private const string OrganisationHeader = "X-EPR-ORGANISATION";
-    private const string LargeProducerId = "9d3c4d0f-8e5a-4b91-9f7a-2e8d6a1c5f42";
-    private const string ComplianceSchemeId = "c71b2e84-3f9d-47aa-a8c6-5b4ef0139d8e";
 
     [Fact]
     public async Task GetObligationCalculation_ReturnsLargeProducerResponse()
     {
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
-        request.Headers.Add(OrganisationHeader, LargeProducerId);
+        request.Headers.Add(OrganisationHeader, WasteOrganisationStubIds.LargeProducer);
 
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
@@ -31,7 +29,7 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
         Assert.Equal(1, body.NumberOfPrnsAwaitingAcceptance);
         Assert.All(
             body.ObligationData,
-            data => Assert.Equal(Guid.Parse(LargeProducerId), data.OrganisationId)
+            data => Assert.Equal(WasteOrganisationStubIds.LargeProducerGuid, data.OrganisationId)
         );
         Assert.Contains(
             body.ObligationData,
@@ -44,7 +42,7 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
     {
         using var client = factory.CreateClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
-        request.Headers.Add(OrganisationHeader, ComplianceSchemeId);
+        request.Headers.Add(OrganisationHeader, WasteOrganisationStubIds.ComplianceScheme);
 
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
@@ -57,7 +55,7 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
         Assert.Equal(2, body.NumberOfPrnsAwaitingAcceptance);
         Assert.All(
             body.ObligationData,
-            data => Assert.Equal(Guid.Parse(ComplianceSchemeId), data.OrganisationId)
+            data => Assert.Equal(WasteOrganisationStubIds.ComplianceSchemeGuid, data.OrganisationId)
         );
         Assert.Contains(
             body.ObligationData,
@@ -75,7 +73,7 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
             HttpMethod.Get,
             $"/epr-prn-common-backend/api/v1/prn/obligationcalculation/{year}"
         );
-        request.Headers.Add(OrganisationHeader, LargeProducerId);
+        request.Headers.Add(OrganisationHeader, WasteOrganisationStubIds.LargeProducer);
 
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
