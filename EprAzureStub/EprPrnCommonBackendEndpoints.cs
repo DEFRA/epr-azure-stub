@@ -36,6 +36,15 @@ public static class EprPrnCommonBackendEndpoints
                     var id when id == WasteOrganisationStubIds.ComplianceSchemeGuid => Results.Ok(
                         CreateComplianceSchemeResponse(id)
                     ),
+                    var id
+                        when id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
+                            => Results.Ok(CreateLargeProducerResponse(id)),
+                    var id
+                        when id == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid
+                            => Results.Ok(CreateComplianceSchemeResponse(id)),
+                    var id
+                        when id == WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid
+                            => Results.Ok(CreateComplianceSchemeResponse(id)),
                     _ => Results.NotFound(),
                 };
             }
