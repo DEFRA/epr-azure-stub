@@ -77,6 +77,31 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
     }
 
     [Theory]
+    [MemberData(nameof(AllWasteOrganisationStubIds))]
+    public async Task GetObligationCalculation_ReturnsOk_ForEveryWasteOrganisationStubId(
+        string organisationId
+    )
+    {
+        using var client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
+        request.Headers.Add(OrganisationHeader, organisationId);
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<ObligationModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.NotEmpty(body.ObligationData);
+        Assert.All(
+            body.ObligationData,
+            data => Assert.Equal(Guid.Parse(organisationId), data.OrganisationId)
+        );
+    }
+
+    [Theory]
     [InlineData(2023)]
     [InlineData(2030)]
     public async Task GetObligationCalculation_ReturnsBadRequest_WhenYearIsOutOfRange(int year)
@@ -135,5 +160,13 @@ public class EprPrnCommonBackendEndpointsTests(WebApplicationFactory<Program> fa
         public int? TonnageOutstanding { get; init; }
 
         public string Status { get; init; } = string.Empty;
+    }
+
+    public static IEnumerable<object[]> AllWasteOrganisationStubIds()
+    {
+        return typeof(WasteOrganisationStubIds)
+            .GetFields()
+            .Where(field => field.IsLiteral && field.FieldType == typeof(string))
+            .Select(field => new[] { field.GetRawConstantValue()! });
     }
 }
