@@ -7,6 +7,15 @@
 
 ## Repository references
 
+### OAuth
+
+Endpoints to replicate are:
+
+- /oauth2/v2.0/token
+  - Should replicate a token POST request, returning the payload for an access token
+  - Stub does not need to be complex or validate any request params
+  - It should return JSON response with expires_in and access_token value of "access_token"
+
 ### [epr-prn-common-backend](https://github.com/DEFRA/epr-prn-common-backend)
 
 Endpoints to replicate are:
