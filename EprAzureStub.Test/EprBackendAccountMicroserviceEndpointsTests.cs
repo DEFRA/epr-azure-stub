@@ -14,6 +14,9 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     private const string UserOrganisationsEndpoint =
         "/epr-backend-account-microservice/api/users/user-organisations";
 
+    private const string ComplianceSchemesForOperatorEndpoint =
+        "/epr-backend-account-microservice/api/compliance-schemes/get-for-operator";
+
     [Fact]
     public async Task GetAdminHealth_ReturnsOk()
     {
@@ -302,6 +305,61 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     }
 
     [Fact]
+    public async Task GetComplianceSchemesForOperator_ReturnsSeededComplianceSchemeResponse()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={WasteOrganisationStubIds.SeededComplianceSchemeOrganisation}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<List<ComplianceSchemeResponseModel>>(
+            TestContext.Current.CancellationToken
+        );
+        var scheme = Assert.Single(body);
+        Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid, scheme.Id);
+        Assert.Equal("Compliance Scheme Name", scheme.Name);
+        Assert.Equal(1, scheme.RowNumber);
+        Assert.Equal(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), scheme.CreatedOn);
+        Assert.Equal(1, scheme.NationId);
+    }
+
+    [Fact]
+    public async Task GetComplianceSchemesForOperator_ReturnsEmptyResponse_ForSeededDirectProducer()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={WasteOrganisationStubIds.SeededDirectProducerOrganisation}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<List<ComplianceSchemeResponseModel>>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Empty(body);
+    }
+
+    [Fact]
+    public async Task GetComplianceSchemesForOperator_ReturnsNotFound_WhenOrganisationIsUnknown()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={Guid.NewGuid()}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task GetUserOrganisations_ReturnsApprovedDirectProducerUserResponse()
     {
         using var client = factory.CreateClient();
@@ -495,6 +553,19 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         public int NumberOfOrganisations { get; init; }
 
         public IReadOnlyList<OrganisationDetailModel> Organisations { get; init; } = [];
+    }
+
+    private sealed record ComplianceSchemeResponseModel
+    {
+        public int RowNumber { get; init; }
+
+        public Guid Id { get; init; }
+
+        public string Name { get; init; } = string.Empty;
+
+        public DateTimeOffset CreatedOn { get; init; }
+
+        public int NationId { get; init; }
     }
 
     private sealed record OrganisationDetailModel

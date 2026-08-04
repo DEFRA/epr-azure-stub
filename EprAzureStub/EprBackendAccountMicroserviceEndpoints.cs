@@ -64,6 +64,29 @@ public static class EprBackendAccountMicroserviceEndpoints
                 return response is null ? Results.NotFound() : Results.Ok(response);
             }
         );
+
+        group.MapGet(
+            "/api/compliance-schemes/get-for-operator",
+            ([FromQuery] Guid organisationId) =>
+            {
+                if (organisationId == Guid.Empty)
+                {
+                    return Results.BadRequest();
+                }
+
+                if (organisationId == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)
+                {
+                    return Results.Ok(CreateSeededComplianceSchemeResponse());
+                }
+
+                if (organisationId == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid)
+                {
+                    return Results.Ok(Array.Empty<ComplianceSchemeResponseModel>());
+                }
+
+                return Results.NotFound();
+            }
+        );
     }
 
     private static bool IsEntityTypeCode(string? actual, string expected)
@@ -213,6 +236,21 @@ public static class EprBackendAccountMicroserviceEndpoints
             .ToList();
     }
 
+    private static IReadOnlyList<ComplianceSchemeResponseModel> CreateSeededComplianceSchemeResponse()
+    {
+        return
+        [
+            new()
+            {
+                RowNumber = 1,
+                Id = WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid,
+                Name = "Compliance Scheme Name",
+                CreatedOn = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                NationId = 1,
+            },
+        ];
+    }
+
     private static UserOrganisationsListModel? CreateUserOrganisationsResponse(Guid userId)
     {
         var seededUser = FindSeededUser(userId);
@@ -316,6 +354,19 @@ public static class EprBackendAccountMicroserviceEndpoints
         public required string LastName { get; init; }
 
         public required string Email { get; init; }
+    }
+
+    private sealed record ComplianceSchemeResponseModel
+    {
+        public int RowNumber { get; init; }
+
+        public Guid Id { get; init; }
+
+        public required string Name { get; init; }
+
+        public DateTimeOffset CreatedOn { get; init; }
+
+        public int NationId { get; init; }
     }
 
     private sealed record UserOrganisationsListModel
