@@ -16,7 +16,11 @@ public static class EprPrnCommonBackendEndpoints
 
         group.MapGet(
             "/api/v1/prn/obligationcalculation/{year:int}",
-            (int year, [FromHeader(Name = OrganisationHeader)] Guid? organisationId) =>
+            (
+                int year,
+                [FromHeader(Name = OrganisationHeader)] Guid? organisationId,
+                LoadTestSessionState loadTestSessionState
+            ) =>
             {
                 if (year is < StartYear or > EndYear)
                 {
@@ -26,6 +30,18 @@ public static class EprPrnCommonBackendEndpoints
                 if (organisationId is null || organisationId == Guid.Empty)
                 {
                     return Results.BadRequest($"Missing or invalid {OrganisationHeader} header.");
+                }
+
+                if (
+                    loadTestSessionState.TryGetAllocationForOrganisation(
+                        organisationId.Value,
+                        out var loadTestAllocation
+                    )
+                )
+                {
+                    return loadTestAllocation.IsComplianceScheme
+                        ? Results.Ok(CreateComplianceSchemeResponse(organisationId.Value))
+                        : Results.Ok(CreateLargeProducerResponse(organisationId.Value));
                 }
 
                 return organisationId.Value switch

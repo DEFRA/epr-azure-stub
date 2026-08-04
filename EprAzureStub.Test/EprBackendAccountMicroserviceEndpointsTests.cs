@@ -17,6 +17,19 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     private const string ComplianceSchemesForOperatorEndpoint =
         "/epr-backend-account-microservice/api/compliance-schemes/get-for-operator";
 
+    private const string LoadTestSessionsEndpoint =
+        "/admin/load-test-sessions";
+
+    private const string PrnObligationCalculationEndpoint =
+        "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2026";
+
+    private static readonly Guid ComplianceSchemeUserId = Guid.Parse(
+        "579c319d-d552-47a2-bf4c-5a125a3183bc"
+    );
+    private static readonly Guid DirectProducerUserId = Guid.Parse(
+        "79d0deab-c22d-4c30-8082-508ff8dc1bd7"
+    );
+
     [Fact]
     public async Task GetAdminHealth_ReturnsOk()
     {
@@ -319,6 +332,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         var body = await response.Content.ReadFromJsonAsync<List<ComplianceSchemeResponseModel>>(
             TestContext.Current.CancellationToken
         );
+        Assert.NotNull(body);
         var scheme = Assert.Single(body);
         Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid, scheme.Id);
         Assert.Equal("Compliance Scheme Name", scheme.Name);
@@ -357,6 +371,202 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         );
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InitialiseLoadTestSession_ReturnsTheRequestedMixOfDistinctAllocations()
+    {
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+
+        var response = await client.PostAsJsonAsync(
+            LoadTestSessionsEndpoint,
+            new LoadTestSessionInitialisationRequest(
+                runId,
+                DirectProducerUserCount: 1,
+                ComplianceSchemeUserCount: 3
+            ),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var body = await response.Content.ReadFromJsonAsync<LoadTestSessionResponse>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        Assert.Equal(runId, body.RunId);
+        Assert.Equal(4, body.UserCount);
+        Assert.Equal(1, body.DirectProducerUserCount);
+        Assert.Equal(3, body.ComplianceSchemeUserCount);
+        Assert.Equal(2, body.Users.Count);
+
+        var complianceScheme = Assert.Single(
+            body.Users,
+            user => user.UserId == ComplianceSchemeUserId
+        );
+        Assert.All(
+            complianceScheme.Allocations,
+            allocation => Assert.NotNull(allocation.OperatorOrganisationId)
+        );
+        Assert.Equal(3, complianceScheme.Allocations.Count);
+        Assert.Equal(3, complianceScheme.Allocations.Select(allocation => allocation.OrganisationId).Distinct().Count());
+        var directProducer = Assert.Single(
+            body.Users,
+            user => user.UserId == DirectProducerUserId
+        );
+        Assert.All(
+            directProducer.Allocations,
+            allocation => Assert.Null(allocation.OperatorOrganisationId)
+        );
+        Assert.Single(directProducer.Allocations);
+    }
+
+    [Fact]
+    public async Task AccountServiceDoesNotExposeTheLoadTestSessionControlEndpoint()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/epr-backend-account-microservice/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(Guid.NewGuid(), 1, 1),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoadTestSession_ReturnsConsistentDirectProducerOrganisationForVirtualUser()
+    {
+        using var client = factory.CreateClient();
+        var (runId, allocation) = await InitialiseLoadTestSession(client, DirectProducerUserId, 2, 1);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{UserOrganisationsEndpoint}?userId={DirectProducerUserId}"
+        );
+        request.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:1");
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        var organisation = Assert.Single(body.User.Organisations);
+        Assert.Equal(allocation.OrganisationId, organisation.Id);
+        Assert.Equal("POP QUEST LTD 2", organisation.Name);
+    }
+
+    [Fact]
+    public async Task LoadTestSession_ReturnsPrnObligationsForGeneratedOrganisation()
+    {
+        using var client = factory.CreateClient();
+        var (_, allocation) = await InitialiseLoadTestSession(
+            client,
+            DirectProducerUserId,
+            1,
+            0
+        );
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            PrnObligationCalculationEndpoint
+        );
+        request.Headers.Add("X-EPR-ORGANISATION", allocation.OrganisationId.ToString());
+
+        var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoadTestSession_ReturnsLinkedComplianceSchemeForVirtualUser()
+    {
+        using var client = factory.CreateClient();
+        var (runId, allocation) = await InitialiseLoadTestSession(
+            client,
+            ComplianceSchemeUserId,
+            2,
+            1
+        );
+        Assert.NotNull(allocation.OperatorOrganisationId);
+
+        using var userRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{UserOrganisationsEndpoint}?userId={ComplianceSchemeUserId}"
+        );
+        userRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:1");
+
+        var userResponse = await client.SendAsync(
+            userRequest,
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, userResponse.StatusCode);
+        var userBody = await userResponse.Content.ReadFromJsonAsync<UserOrganisationsListModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(userBody);
+        var organisation = Assert.Single(userBody.User.Organisations);
+        Assert.Equal(allocation.OperatorOrganisationId, organisation.Id);
+        Assert.Equal("Organisation Name 2", organisation.Name);
+
+        using var schemeRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={allocation.OperatorOrganisationId}"
+        );
+        schemeRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:1");
+
+        var schemeResponse = await client.SendAsync(
+            schemeRequest,
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, schemeResponse.StatusCode);
+        var schemes = await schemeResponse.Content.ReadFromJsonAsync<List<ComplianceSchemeResponseModel>>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(schemes);
+        var scheme = Assert.Single(schemes);
+        Assert.Equal(allocation.OrganisationId, scheme.Id);
+        Assert.Equal("Compliance Scheme Name 2", scheme.Name);
+    }
+
+    [Fact]
+    public async Task InitialiseLoadTestSession_ReplacesThePreviousRun()
+    {
+        using var client = factory.CreateClient();
+        var (firstRunId, firstAllocation) = await InitialiseLoadTestSession(
+            client,
+            DirectProducerUserId,
+            1,
+            0
+        );
+        var (secondRunId, secondAllocation) = await InitialiseLoadTestSession(
+            client,
+            DirectProducerUserId,
+            1,
+            0
+        );
+
+        Assert.NotEqual(firstRunId, secondRunId);
+        Assert.NotEqual(firstAllocation.OrganisationId, secondAllocation.OrganisationId);
+
+        using var staleRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{UserOrganisationsEndpoint}?userId={DirectProducerUserId}"
+        );
+        staleRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{firstRunId}:0");
+
+        var staleResponse = await client.SendAsync(
+            staleRequest,
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.Conflict, staleResponse.StatusCode);
     }
 
     [Fact]
@@ -518,6 +728,33 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         );
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    private static async Task<(Guid RunId, LoadTestOrganisationAllocation Allocation)>
+        InitialiseLoadTestSession(
+            HttpClient client,
+            Guid userId,
+            int userCount,
+            int userIndex
+        )
+    {
+        var runId = Guid.NewGuid();
+        var response = await client.PostAsJsonAsync(
+            LoadTestSessionsEndpoint,
+            new LoadTestSessionInitialisationRequest(runId, userCount, userCount),
+            TestContext.Current.CancellationToken
+        );
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<LoadTestSessionResponse>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(body);
+        var user = Assert.Single(body.Users, candidate => candidate.UserId == userId);
+
+        return (
+            runId,
+            Assert.Single(user.Allocations, candidate => candidate.UserIndex == userIndex)
+        );
     }
 
     private sealed record PersonEmailResponseModel

@@ -12,11 +12,36 @@ public static class EprBackendAccountMicroserviceEndpoints
 
         group.MapGet(
             "/api/organisations/person-emails",
-            ([FromQuery] Guid organisationId, [FromQuery] string? entityTypeCode) =>
+            ([FromQuery] Guid organisationId, [FromQuery] string? entityTypeCode, LoadTestSessionState loadTestSessionState) =>
             {
                 if (organisationId == Guid.Empty)
                 {
                     return Results.BadRequest();
+                }
+
+                if (
+                    loadTestSessionState.TryGetAllocationForOrganisation(
+                        organisationId,
+                        out var loadTestAllocation
+                    )
+                    && loadTestAllocation.UserId == LoadTestSessionState.DirectProducerUserId
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.DirectRegistrant)
+                )
+                {
+                    return Results.Ok(CreateSeededDirectProducerPersonEmailsResponse());
+                }
+
+                if (
+                    loadTestSessionState.TryGetAllocationForOrganisation(
+                        organisationId,
+                        out loadTestAllocation
+                    )
+                    && loadTestAllocation.UserId == LoadTestSessionState.ComplianceSchemeUserId
+                    && organisationId == loadTestAllocation.OrganisationId
+                    && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.ComplianceScheme)
+                )
+                {
+                    return Results.Ok(CreateSeededComplianceSchemePersonEmailsResponse());
                 }
 
                 if (
@@ -57,8 +82,36 @@ public static class EprBackendAccountMicroserviceEndpoints
 
         group.MapGet(
             "/api/users/user-organisations",
-            ([FromQuery] Guid userId) =>
+            (
+                [FromQuery] Guid userId,
+                HttpRequest request,
+                LoadTestSessionState loadTestSessionState
+            ) =>
             {
+                var loadTestSessionKey = GetLoadTestSessionKey(request);
+
+                if (loadTestSessionKey is not null && LoadTestSessionState.IsSupportedUser(userId))
+                {
+                    if (
+                        !loadTestSessionState.TryGetAllocationForUser(
+                            userId,
+                            loadTestSessionKey,
+                            out var loadTestAllocation
+                        )
+                    )
+                    {
+                        return Results.Conflict(
+                            new { message = "Load test session is missing or does not match the user." }
+                        );
+                    }
+
+                    var loadTestUser = FindSeededUser(userId)!;
+
+                    return Results.Ok(
+                        CreateUserOrganisationsResponse(loadTestUser, loadTestAllocation)
+                    );
+                }
+
                 var response = CreateUserOrganisationsResponse(userId);
 
                 return response is null ? Results.NotFound() : Results.Ok(response);
@@ -67,11 +120,35 @@ public static class EprBackendAccountMicroserviceEndpoints
 
         group.MapGet(
             "/api/compliance-schemes/get-for-operator",
-            ([FromQuery] Guid organisationId) =>
+            (
+                [FromQuery] Guid organisationId,
+                HttpRequest request,
+                LoadTestSessionState loadTestSessionState
+            ) =>
             {
                 if (organisationId == Guid.Empty)
                 {
                     return Results.BadRequest();
+                }
+
+                var loadTestSessionKey = GetLoadTestSessionKey(request);
+
+                if (loadTestSessionKey is not null)
+                {
+                    if (
+                        !loadTestSessionState.TryGetComplianceSchemeForOperator(
+                            organisationId,
+                            loadTestSessionKey,
+                            out var loadTestAllocation
+                        )
+                    )
+                    {
+                        return Results.Conflict(
+                            new { message = "Load test session is missing or does not match the operator." }
+                        );
+                    }
+
+                    return Results.Ok(CreateLoadTestComplianceSchemeResponse(loadTestAllocation));
                 }
 
                 if (organisationId == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)
@@ -87,6 +164,16 @@ public static class EprBackendAccountMicroserviceEndpoints
                 return Results.NotFound();
             }
         );
+    }
+
+    private static string? GetLoadTestSessionKey(HttpRequest request)
+    {
+        return request.Headers.TryGetValue(
+            LoadTestSessionState.SessionHeaderName,
+            out var value
+        )
+            ? value.ToString()
+            : null;
     }
 
     private static bool IsEntityTypeCode(string? actual, string expected)
@@ -251,6 +338,23 @@ public static class EprBackendAccountMicroserviceEndpoints
         ];
     }
 
+    private static IReadOnlyList<ComplianceSchemeResponseModel> CreateLoadTestComplianceSchemeResponse(
+        LoadTestOrganisationAllocation allocation
+    )
+    {
+        return
+        [
+            new()
+            {
+                RowNumber = 1,
+                Id = allocation.OrganisationId,
+                Name = allocation.ComplianceSchemeName!,
+                CreatedOn = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
+                NationId = 1,
+            },
+        ];
+    }
+
     private static UserOrganisationsListModel? CreateUserOrganisationsResponse(Guid userId)
     {
         var seededUser = FindSeededUser(userId);
@@ -282,6 +386,41 @@ public static class EprBackendAccountMicroserviceEndpoints
     private static UserOrganisationsListModel CreateUserOrganisationsResponse(SeededUser seededUser)
     {
         var organisation = CreateOrganisationDetail(seededUser.Organisation);
+
+        return new()
+        {
+            User = new()
+            {
+                Id = seededUser.UserId,
+                FirstName = seededUser.FirstName,
+                LastName = seededUser.LastName,
+                Email = seededUser.Email,
+                RoleInOrganisation = AdminRole,
+                EnrolmentStatus = ApprovedEnrolmentStatus,
+                ServiceRole = seededUser.ServiceRole,
+                Service = EprPackagingService,
+                ServiceRoleId = seededUser.ServiceRoleId,
+                Telephone = seededUser.Telephone,
+                JobTitle = DirectorJobTitle,
+                IsChangeRequestPending = false,
+                NumberOfOrganisations = 1,
+                Organisations = [organisation],
+            },
+        };
+    }
+
+    private static UserOrganisationsListModel CreateUserOrganisationsResponse(
+        SeededUser seededUser,
+        LoadTestOrganisationAllocation allocation
+    )
+    {
+        var organisation = CreateOrganisationDetail(
+            seededUser.Organisation with
+            {
+                Id = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
+                Name = allocation.OrganisationName,
+            }
+        );
 
         return new()
         {
@@ -444,4 +583,5 @@ public static class EprBackendAccountMicroserviceEndpoints
         public const string DelegatedPerson = "Delegated Person";
         public const string BasicUser = "Basic User";
     }
+
 }
