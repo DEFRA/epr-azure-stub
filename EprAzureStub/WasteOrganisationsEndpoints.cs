@@ -12,6 +12,56 @@ public static class WasteOrganisationsEndpoints
         TimeSpan.Zero
     );
 
+    // These records mirror epr-local-environment's
+    // compose/waste-organisations-seed/payloads/*.json fixtures. The two
+    // signed-in test organisations are handled separately below because they
+    // have Account Service-specific names and trading names.
+    private static readonly IReadOnlyDictionary<Guid, LocalEnvironmentSeededOrganisation>
+        LocalEnvironmentSeededOrganisations =
+            new Dictionary<Guid, LocalEnvironmentSeededOrganisation>
+            {
+                [Guid.Parse("07d0a580-ab20-4ee2-bd78-702a793b4d34")] = new(
+                    "EcoCircle Holdings",
+                    "COMPLIANCE_SCHEME"
+                ),
+                [Guid.Parse("34341291-b377-4047-ad96-93ddb0a1c469")] = new(
+                    "ZESTY GOODS LTD",
+                    "LARGE_PRODUCER"
+                ),
+                [Guid.Parse("42d6a04f-41dc-4e54-8a90-a4b662e5f6ef")] = new(
+                    "GADGET CO LTD",
+                    "SMALL_PRODUCER"
+                ),
+                [Guid.Parse("51478eff-46c5-4387-9e95-ad8dd1e6b20e")] = new(
+                    "BIG BOX RETAIL LTD",
+                    "SMALL_PRODUCER"
+                ),
+                [Guid.Parse("7f72952a-1aaf-4d04-bd9b-146c04aa207d")] = new(
+                    "WastePartners Group",
+                    "COMPLIANCE_SCHEME"
+                ),
+                [Guid.Parse("8947d193-f977-46bd-8beb-52d55c4eca69")] = new(
+                    "ReClaim Partners Ltd",
+                    "COMPLIANCE_SCHEME"
+                ),
+                [Guid.Parse("8c910c57-4231-465d-905f-0e20cc083566")] = new(
+                    "GreenWaste Operator Ltd",
+                    "COMPLIANCE_SCHEME"
+                ),
+                [Guid.Parse("c5c102bb-11f2-4662-bb77-d724f736f80b")] = new(
+                    "CRAFTY THINGS LTD",
+                    "LARGE_PRODUCER"
+                ),
+                [Guid.Parse("ccb3f815-7e75-4dfb-b52a-869d9e7a22c0")] = new(
+                    "CleanLoop Operator Ltd",
+                    "COMPLIANCE_SCHEME"
+                ),
+                [Guid.Parse("d0ab1aed-d4fc-4a88-98f0-b8bae048f170")] = new(
+                    "PARCEL PROS LTD",
+                    "LARGE_PRODUCER"
+                ),
+            };
+
     public static void MapWasteOrganisationsEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/waste-organisations");
@@ -77,6 +127,17 @@ public static class WasteOrganisationsEndpoints
 
     private static OrganisationResponseModel? CreateSeededOrganisationResponse(Guid id)
     {
+        if (LocalEnvironmentSeededOrganisations.TryGetValue(id, out var seededOrganisation))
+        {
+            return CreateOrganisationResponse(
+                id,
+                seededOrganisation.Name,
+                null,
+                string.Empty,
+                seededOrganisation.RegistrationType
+            );
+        }
+
         return id switch
         {
             var seededDirectProducerId
@@ -193,4 +254,9 @@ public static class WasteOrganisationsEndpoints
 
         public DateTimeOffset Updated { get; init; }
     }
+
+    private sealed record LocalEnvironmentSeededOrganisation(
+        string Name,
+        string RegistrationType
+    );
 }

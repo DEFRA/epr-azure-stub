@@ -134,6 +134,90 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
         );
     }
 
+    [Theory]
+    [InlineData(
+        "07d0a580-ab20-4ee2-bd78-702a793b4d34",
+        "EcoCircle Holdings",
+        "COMPLIANCE_SCHEME"
+    )]
+    [InlineData(
+        "34341291-b377-4047-ad96-93ddb0a1c469",
+        "ZESTY GOODS LTD",
+        "LARGE_PRODUCER"
+    )]
+    [InlineData(
+        "42d6a04f-41dc-4e54-8a90-a4b662e5f6ef",
+        "GADGET CO LTD",
+        "SMALL_PRODUCER"
+    )]
+    [InlineData(
+        "51478eff-46c5-4387-9e95-ad8dd1e6b20e",
+        "BIG BOX RETAIL LTD",
+        "SMALL_PRODUCER"
+    )]
+    [InlineData(
+        "7f72952a-1aaf-4d04-bd9b-146c04aa207d",
+        "WastePartners Group",
+        "COMPLIANCE_SCHEME"
+    )]
+    [InlineData(
+        "8947d193-f977-46bd-8beb-52d55c4eca69",
+        "ReClaim Partners Ltd",
+        "COMPLIANCE_SCHEME"
+    )]
+    [InlineData(
+        "8c910c57-4231-465d-905f-0e20cc083566",
+        "GreenWaste Operator Ltd",
+        "COMPLIANCE_SCHEME"
+    )]
+    [InlineData(
+        "c5c102bb-11f2-4662-bb77-d724f736f80b",
+        "CRAFTY THINGS LTD",
+        "LARGE_PRODUCER"
+    )]
+    [InlineData(
+        "ccb3f815-7e75-4dfb-b52a-869d9e7a22c0",
+        "CleanLoop Operator Ltd",
+        "COMPLIANCE_SCHEME"
+    )]
+    [InlineData(
+        "d0ab1aed-d4fc-4a88-98f0-b8bae048f170",
+        "PARCEL PROS LTD",
+        "LARGE_PRODUCER"
+    )]
+    public async Task GetOrganisation_ReturnsOrganisationSeededByLocalEnvironment(
+        string organisationId,
+        string expectedName,
+        string expectedRegistrationType
+    )
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{OrganisationsEndpoint}/{organisationId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var organisation = await response.Content.ReadFromJsonAsync<OrganisationResponseModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(organisation);
+        Assert.Equal(expectedName, organisation.Name);
+        Assert.All(
+            organisation.Registrations,
+            registration =>
+            {
+                Assert.Equal("REGISTERED", registration.Status);
+                Assert.Equal(expectedRegistrationType, registration.Type);
+            }
+        );
+        Assert.Equal(
+            Enumerable.Range(2025, 6),
+            organisation.Registrations.Select(registration => registration.RegistrationYear)
+        );
+    }
+
     [Fact]
     public async Task GetOrganisation_ReturnsNotFound_ForUnknownOrOperatorOrganisationId()
     {
