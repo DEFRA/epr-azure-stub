@@ -49,6 +49,32 @@ Endpoints to replicate are:
 - /admin/health
   - A simple GET endpoint that returns 200
 
+### [waste-organisations](https://github.com/DEFRA/waste-organisations)
+
+Endpoints to replicate are:
+
+- /organisations/{id}
+  - Available under the `/waste-organisations` route group in this stub.
+  - Return responses for the seeded direct producer and compliance scheme used to establish browser sessions, as well as organisation IDs allocated by `LoadTestSessionState`.
+  - Also return every static organisation fixture under [`../epr-local-environment/compose/waste-organisations-seed/payloads/`](../epr-local-environment/compose/waste-organisations-seed/payloads/). The filename is the organisation ID; its JSON provides the name, trading name and registration type.
+    - The Local Environment seeder writes each fixture for registration years 2025–2030. Keep the stub response registrations aligned with those years so `waste-obligations-seed` can create and query its seeded declarations when Waste Obligations is routed here.
+    - `waste-organisations-seed` itself continues to PUT to the normal local `waste-organisations` service. This stub needs only the corresponding deterministic GET responses used downstream by Waste Obligations.
+    - When fixtures change, refresh `LocalEnvironmentSeededOrganisations` in `EprAzureStub/WasteOrganisationsEndpoints.cs`, update `GetOrganisation_ReturnsOrganisationSeededByLocalEnvironment` in `EprAzureStub.Test/WasteOrganisationsEndpointsTests.cs`, and run `dotnet test`.
+  - The allocated direct producer returns a `LARGE_PRODUCER` registration; the allocated compliance scheme returns a `COMPLIANCE_SCHEME` registration and its numbered scheme name as `tradingName`.
+  - The compliance operator organisation ID is not a Waste Organisations ID. It is only used to resolve the scheme through Account Service's `get-for-operator` endpoint.
+  - Keep this endpoint backed by the same `LoadTestSessionState` as the Account Service and PRN stubs. Do not create an independent random allocation or depend on forwarding the load-test header from Waste Obligations.
+- /health/authorized
+  - A simple GET endpoint that returns 200 for downstream dependency checks.
+
+## Stub control endpoints
+
+These routes are specific to this stub and do not replicate an upstream service API.
+
+- /admin/load-test-sessions
+  - Initialise the single in-memory load-test allocation set, replacing any prior run.
+  - Callers supply `runId`, `directProducerUserCount`, and `complianceSchemeUserCount`; the response reports the total `userCount` and each requested type count.
+  - The allocation is selected later using `X-EPR-Load-Test-Session: {runId}:{userIndex}`. Keep every generated organisation response backed by this shared state.
+
 ## Replicating stub endpoints
 
 1. Confirm the required repositories exist in the parent folder before starting:
@@ -87,6 +113,7 @@ Endpoints to replicate are:
 
 - Service accepts organisations with a single registration
 - Registrations will be added to if they do not already exist for the organisation
+- For performance testing, the frontend and Waste Obligations use this repository's `/waste-organisations` route group rather than `waste-organisations-stub`, so generated organisation IDs can be resolved from the shared load-test allocation.
 
 ### [waste-organisations-stub](https://github.com/DEFRA/waste-organisations-stub)
 

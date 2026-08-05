@@ -16,7 +16,12 @@ public static class EprPrnCommonBackendEndpoints
 
         group.MapGet(
             "/api/v1/prn/obligationcalculation/{year:int}",
-            (int year, [FromHeader(Name = OrganisationHeader)] Guid? organisationId) =>
+            (
+                int year,
+                [FromHeader(Name = OrganisationHeader)] Guid? organisationId,
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
+            ) =>
             {
                 if (year is < StartYear or > EndYear)
                 {
@@ -26,6 +31,30 @@ public static class EprPrnCommonBackendEndpoints
                 if (organisationId is null || organisationId == Guid.Empty)
                 {
                     return Results.BadRequest($"Missing or invalid {OrganisationHeader} header.");
+                }
+
+                if (
+                    loadTestSessionState.TryGetAllocationForOrganisation(
+                        organisationId.Value,
+                        out var loadTestAllocation
+                    )
+                )
+                {
+                    loggerFactory
+                        .CreateLogger(nameof(EprPrnCommonBackendEndpoints))
+                        .LogInformation(
+                            "Load-test PRN mapping: organisation {OrganisationId} maps to {OrganisationType} allocation {LoadTestUserIndex} for obligation year {ObligationYear}.",
+                            organisationId.Value,
+                            loadTestAllocation.IsComplianceScheme
+                                ? "compliance scheme"
+                                : "direct producer",
+                            loadTestAllocation.UserIndex,
+                            year
+                        );
+
+                    return loadTestAllocation.IsComplianceScheme
+                        ? Results.Ok(CreateComplianceSchemeResponse(organisationId.Value))
+                        : Results.Ok(CreateLargeProducerResponse(organisationId.Value));
                 }
 
                 return organisationId.Value switch

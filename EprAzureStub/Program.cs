@@ -7,6 +7,7 @@ builder.Configuration.AddEnvironmentVariables();
 builder.Services.AddCustomTrustStore(); // This must happen before Mongo and Http client connections
 builder.ConfigureLoggingAndTracing();
 builder.Services.AddHealthChecks();
+builder.Services.AddSingleton<LoadTestSessionState>();
 
 var app = builder.Build();
 app.MapHealthChecks("/health");
