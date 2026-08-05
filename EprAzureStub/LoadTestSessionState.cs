@@ -5,6 +5,8 @@ public sealed class LoadTestSessionState
     public const string SessionHeaderName = "X-EPR-Load-Test-Session";
 
     private const int MaximumUserCount = 1000;
+    public const int MinimumLeaseDurationSeconds = 60;
+    public const int MaximumLeaseDurationSeconds = 86_400;
     public static readonly Guid ComplianceSchemeUserId = Guid.Parse(
         "579c319d-d552-47a2-bf4c-5a125a3183bc"
     );
@@ -13,6 +15,7 @@ public sealed class LoadTestSessionState
     );
 
     private readonly object _sync = new();
+    private LoadTestRunLease? _runLease;
     private LoadTestSession? _session;
 
     public static bool IsSupportedUser(Guid userId)
@@ -20,7 +23,82 @@ public sealed class LoadTestSessionState
         return userId == ComplianceSchemeUserId || userId == DirectProducerUserId;
     }
 
-    public LoadTestSessionResponse Initialise(
+    public LoadTestRunLeaseAcquireResult AcquireRunLease(
+        Guid runId,
+        string profile,
+        int leaseDurationSeconds
+    )
+    {
+        var now = TimeProvider.System.GetUtcNow();
+        var expiresAtUtc = now.AddSeconds(leaseDurationSeconds);
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(now);
+
+            if (_runLease is null)
+            {
+                _runLease = new(runId, profile, expiresAtUtc);
+                return new(true, false, _runLease.ToResponse());
+            }
+
+            if (_runLease.RunId == runId)
+            {
+                _runLease = _runLease with { ExpiresAtUtc = expiresAtUtc };
+                return new(true, true, _runLease.ToResponse());
+            }
+
+            return new(false, false, _runLease.ToResponse());
+        }
+    }
+
+    public bool RenewRunLease(Guid runId, int leaseDurationSeconds)
+    {
+        var now = TimeProvider.System.GetUtcNow();
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(now);
+
+            if (_runLease?.RunId != runId)
+            {
+                return false;
+            }
+
+            _runLease = _runLease with { ExpiresAtUtc = now.AddSeconds(leaseDurationSeconds) };
+            return true;
+        }
+    }
+
+    public LoadTestRunLeaseReleaseResult ReleaseRunLease(Guid runId)
+    {
+        var now = TimeProvider.System.GetUtcNow();
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(now);
+
+            if (_runLease is null)
+            {
+                return LoadTestRunLeaseReleaseResult.Released;
+            }
+
+            if (_runLease.RunId != runId)
+            {
+                return LoadTestRunLeaseReleaseResult.HeldByAnotherRun;
+            }
+
+            _runLease = null;
+            if (_session?.RunId == runId)
+            {
+                _session = null;
+            }
+
+            return LoadTestRunLeaseReleaseResult.Released;
+        }
+    }
+
+    public LoadTestSessionInitialisationResult Initialise(
         Guid runId,
         int directProducerUserCount,
         int complianceSchemeUserCount
@@ -40,6 +118,141 @@ public sealed class LoadTestSessionState
             );
         }
 
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+
+            if (_runLease?.RunId != runId)
+            {
+                return new(null, false);
+            }
+
+            if (_session?.RunId == runId)
+            {
+                return new(_session.ToResponse(), true);
+            }
+
+            var session = new LoadTestSession(
+                runId,
+                totalUserCount,
+                directProducerUserCount,
+                complianceSchemeUserCount,
+                CreateAllocations(directProducerUserCount, complianceSchemeUserCount)
+            );
+
+            _session = session;
+            return new(session.ToResponse(), false);
+        }
+    }
+
+    public bool TryGetAllocationForUser(
+        Guid userId,
+        string sessionKey,
+        out LoadTestOrganisationAllocation allocation
+    )
+    {
+        allocation = default!;
+
+        if (!TryParseSessionKey(sessionKey, out var runId, out var userIndex))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+
+            if (_session?.RunId != runId)
+            {
+                return false;
+            }
+
+            allocation = _session.Allocations.SingleOrDefault(candidate =>
+                candidate.UserId == userId && candidate.UserIndex == userIndex
+            )!;
+
+            return allocation is not null;
+        }
+    }
+
+    public bool TryGetComplianceSchemeForOperator(
+        Guid operatorOrganisationId,
+        string sessionKey,
+        out LoadTestOrganisationAllocation allocation
+    )
+    {
+        allocation = default!;
+
+        if (!TryParseSessionKey(sessionKey, out var runId, out var userIndex))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+
+            if (_session?.RunId != runId)
+            {
+                return false;
+            }
+
+            allocation = _session.Allocations.SingleOrDefault(candidate =>
+                candidate.UserId == ComplianceSchemeUserId
+                && candidate.UserIndex == userIndex
+                && candidate.OperatorOrganisationId == operatorOrganisationId
+            )!;
+
+            return allocation is not null;
+        }
+    }
+
+    public bool TryGetAllocationForOrganisation(
+        Guid organisationId,
+        out LoadTestOrganisationAllocation allocation
+    )
+    {
+        allocation = default!;
+
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+
+            if (_session is null)
+            {
+                return false;
+            }
+
+            allocation = _session.Allocations.SingleOrDefault(candidate =>
+                candidate.OrganisationId == organisationId
+            )!;
+
+            return allocation is not null;
+        }
+    }
+
+    private static bool TryParseSessionKey(string sessionKey, out Guid runId, out int userIndex)
+    {
+        runId = Guid.Empty;
+        userIndex = -1;
+
+        var separatorIndex = sessionKey.LastIndexOf(':');
+
+        if (separatorIndex <= 0 || separatorIndex == sessionKey.Length - 1)
+        {
+            return false;
+        }
+
+        return Guid.TryParse(sessionKey[..separatorIndex], out runId)
+            && int.TryParse(sessionKey[(separatorIndex + 1)..], out userIndex)
+            && userIndex >= 0;
+    }
+
+    private List<LoadTestOrganisationAllocation> CreateAllocations(
+        int directProducerUserCount,
+        int complianceSchemeUserCount
+    )
+    {
         var allocations = new List<LoadTestOrganisationAllocation>();
 
         for (var userIndex = 0; userIndex < directProducerUserCount; userIndex++)
@@ -77,118 +290,21 @@ public sealed class LoadTestSessionState
             );
         }
 
-        var session = new LoadTestSession(
-            runId,
-            totalUserCount,
-            directProducerUserCount,
-            complianceSchemeUserCount,
-            allocations
-        );
-
-        lock (_sync)
-        {
-            // A new load test deliberately replaces every previous allocation.
-            _session = session;
-        }
-
-        return session.ToResponse();
+        return allocations;
     }
 
-    public bool TryGetAllocationForUser(
-        Guid userId,
-        string sessionKey,
-        out LoadTestOrganisationAllocation allocation
-    )
+    private void ExpireRunLeaseIfNeeded(DateTimeOffset now)
     {
-        allocation = default!;
-
-        if (!TryParseSessionKey(sessionKey, out var runId, out var userIndex))
+        if (_runLease is not null && _runLease.ExpiresAtUtc <= now)
         {
-            return false;
-        }
-
-        lock (_sync)
-        {
-            if (_session?.RunId != runId)
-            {
-                return false;
-            }
-
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
-                candidate.UserId == userId && candidate.UserIndex == userIndex
-            )!;
-
-            return allocation is not null;
+            _runLease = null;
+            _session = null;
         }
     }
 
-    public bool TryGetComplianceSchemeForOperator(
-        Guid operatorOrganisationId,
-        string sessionKey,
-        out LoadTestOrganisationAllocation allocation
-    )
+    private sealed record LoadTestRunLease(Guid RunId, string Profile, DateTimeOffset ExpiresAtUtc)
     {
-        allocation = default!;
-
-        if (!TryParseSessionKey(sessionKey, out var runId, out var userIndex))
-        {
-            return false;
-        }
-
-        lock (_sync)
-        {
-            if (_session?.RunId != runId)
-            {
-                return false;
-            }
-
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
-                candidate.UserId == ComplianceSchemeUserId
-                && candidate.UserIndex == userIndex
-                && candidate.OperatorOrganisationId == operatorOrganisationId
-            )!;
-
-            return allocation is not null;
-        }
-    }
-
-    public bool TryGetAllocationForOrganisation(
-        Guid organisationId,
-        out LoadTestOrganisationAllocation allocation
-    )
-    {
-        allocation = default!;
-
-        lock (_sync)
-        {
-            if (_session is null)
-            {
-                return false;
-            }
-
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
-                candidate.OrganisationId == organisationId
-            )!;
-
-            return allocation is not null;
-        }
-    }
-
-    private static bool TryParseSessionKey(string sessionKey, out Guid runId, out int userIndex)
-    {
-        runId = Guid.Empty;
-        userIndex = -1;
-
-        var separatorIndex = sessionKey.LastIndexOf(':');
-
-        if (separatorIndex <= 0 || separatorIndex == sessionKey.Length - 1)
-        {
-            return false;
-        }
-
-        return Guid.TryParse(sessionKey[..separatorIndex], out runId)
-            && int.TryParse(sessionKey[(separatorIndex + 1)..], out userIndex)
-            && userIndex >= 0;
+        public LoadTestRunLeaseResponse ToResponse() => new(RunId, Profile, ExpiresAtUtc);
     }
 
     private sealed record LoadTestSession(
@@ -225,6 +341,31 @@ public sealed class LoadTestSessionState
         }
     }
 }
+
+public sealed record LoadTestRunLeaseAcquireResult(
+    bool Acquired,
+    bool Renewed,
+    LoadTestRunLeaseResponse ActiveLease
+);
+
+public enum LoadTestRunLeaseReleaseResult
+{
+    Released,
+    HeldByAnotherRun,
+}
+
+public sealed record LoadTestSessionInitialisationResult(
+    LoadTestSessionResponse? Response,
+    bool Existing
+);
+
+public sealed record LoadTestRunLeaseRequest(Guid RunId, string Profile, int LeaseDurationSeconds);
+
+public sealed record LoadTestRunLeaseResponse(
+    Guid RunId,
+    string Profile,
+    DateTimeOffset ExpiresAtUtc
+);
 
 public sealed record LoadTestSessionInitialisationRequest(
     Guid RunId,

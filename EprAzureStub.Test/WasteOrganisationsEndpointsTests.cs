@@ -6,12 +6,30 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace EprAzureStub.Test;
 
 public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+    : IClassFixture<WebApplicationFactory<Program>>, IAsyncLifetime
 {
     private const string LoadTestSessionsEndpoint =
         "/admin/load-test-sessions";
 
+    private const string LoadTestRunsEndpoint = "/admin/load-test-runs";
+
     private const string OrganisationsEndpoint = "/waste-organisations/organisations";
+    private readonly List<Guid> _leasedRunIds = [];
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        using var client = factory.CreateClient();
+
+        foreach (var runId in _leasedRunIds)
+        {
+            await client.DeleteAsync(
+                $"{LoadTestRunsEndpoint}/{runId}",
+                TestContext.Current.CancellationToken
+            );
+        }
+    }
 
     [Fact]
     public async Task GetAuthorisedHealth_ReturnsOk()
@@ -248,16 +266,25 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
         Assert.Equal(HttpStatusCode.NotFound, seededOperatorResponse.StatusCode);
     }
 
-    private static async Task<LoadTestOrganisationAllocation> InitialiseLoadTestSession(
+    private async Task<LoadTestOrganisationAllocation> InitialiseLoadTestSession(
         HttpClient client,
         Guid userId,
         int userCount,
         int userIndex
     )
     {
+        var runId = Guid.NewGuid();
+        var leaseResponse = await client.PostAsJsonAsync(
+            LoadTestRunsEndpoint,
+            new LoadTestRunLeaseRequest(runId, "browser-load", 600),
+            TestContext.Current.CancellationToken
+        );
+        leaseResponse.EnsureSuccessStatusCode();
+        _leasedRunIds.Add(runId);
+
         var response = await client.PostAsJsonAsync(
             LoadTestSessionsEndpoint,
-            new LoadTestSessionInitialisationRequest(Guid.NewGuid(), userCount, userCount),
+            new LoadTestSessionInitialisationRequest(runId, userCount, userCount),
             TestContext.Current.CancellationToken
         );
         response.EnsureSuccessStatusCode();

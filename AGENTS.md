@@ -71,9 +71,15 @@ Endpoints to replicate are:
 These routes are specific to this stub and do not replicate an upstream service API.
 
 - /admin/load-test-sessions
-  - Initialise the single in-memory load-test allocation set, replacing any prior run.
-  - Callers supply `runId`, `directProducerUserCount`, and `complianceSchemeUserCount`; the response reports the total `userCount` and each requested type count.
+  - Initialise the single in-memory load-test allocation set for an already leased run.
+  - Callers supply `runId`, `directProducerUserCount`, and `complianceSchemeUserCount`; the response reports the total `userCount` and each requested type count. Repeating the request for the same run must return the existing allocations rather than generating different organisation IDs.
   - The allocation is selected later using `X-EPR-Load-Test-Session: {runId}:{userIndex}`. Keep every generated organisation response backed by this shared state.
+- /admin/load-test-runs
+  - `POST` acquires the single exclusive run lease for a `runId`, profile, and bounded lease duration. A different active run must receive `409 Conflict`; the same run can renew idempotently.
+  - `PUT /{runId}` renews the matching lease and `DELETE /{runId}` releases it. Releasing a different run's lease must return `409 Conflict`.
+  - Lease expiry must clear the matching allocations so an interrupted run cannot leave generated organisation mappings available forever. The performance-test root entrypoint owns acquisition, heartbeat, and release for all profiles.
+  - These controls are administrative endpoints. Restrict `/admin/load-test-runs` and `/admin/load-test-sessions` to the performance-test runner at ingress; do not expose them publicly.
+  - Lease and allocation state are process-local. Deploy a single stub replica while this in-memory implementation is used; move both to shared durable state before scaling out.
 
 ## Replicating stub endpoints
 
