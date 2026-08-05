@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 namespace EprAzureStub.Test;
 
 public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+    : IClassFixture<WebApplicationFactory<Program>>, IAsyncLifetime
 {
     private const string PersonEmailsEndpoint =
         "/epr-backend-account-microservice/api/organisations/person-emails";
@@ -20,6 +20,8 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     private const string LoadTestSessionsEndpoint =
         "/admin/load-test-sessions";
 
+    private const string LoadTestRunsEndpoint = "/admin/load-test-runs";
+
     private const string PrnObligationCalculationEndpoint =
         "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2026";
 
@@ -29,6 +31,22 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     private static readonly Guid DirectProducerUserId = Guid.Parse(
         "79d0deab-c22d-4c30-8082-508ff8dc1bd7"
     );
+    private readonly List<Guid> _leasedRunIds = [];
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        using var client = factory.CreateClient();
+
+        foreach (var runId in _leasedRunIds)
+        {
+            await client.DeleteAsync(
+                $"{LoadTestRunsEndpoint}/{runId}",
+                TestContext.Current.CancellationToken
+            );
+        }
+    }
 
     [Fact]
     public async Task GetAdminHealth_ReturnsOk()
@@ -379,6 +397,8 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         using var client = factory.CreateClient();
         var runId = Guid.NewGuid();
 
+        await AcquireLoadTestRunLease(client, runId);
+
         var response = await client.PostAsJsonAsync(
             LoadTestSessionsEndpoint,
             new LoadTestSessionInitialisationRequest(
@@ -423,6 +443,104 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
             allocation => Assert.Null(allocation.OperatorOrganisationId)
         );
         Assert.Single(directProducer.Allocations);
+    }
+
+    [Fact]
+    public async Task InitialiseLoadTestSession_ReturnsConflict_WhenTheRunDoesNotHoldTheLease()
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync(
+            LoadTestSessionsEndpoint,
+            new LoadTestSessionInitialisationRequest(Guid.NewGuid(), 1, 1),
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoadTestRunLease_PreventsOverlappingRuns_AndCanBeReleasedByItsOwner()
+    {
+        using var client = factory.CreateClient();
+        var firstRunId = Guid.NewGuid();
+        var secondRunId = Guid.NewGuid();
+
+        var firstResponse = await AcquireLoadTestRunLease(client, firstRunId);
+        Assert.Equal(HttpStatusCode.Created, firstResponse.StatusCode);
+
+        var overlappingResponse = await client.PostAsJsonAsync(
+            LoadTestRunsEndpoint,
+            new LoadTestRunLeaseRequest(secondRunId, "lighthouse", 600),
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.Conflict, overlappingResponse.StatusCode);
+
+        var releaseResponse = await client.DeleteAsync(
+            $"{LoadTestRunsEndpoint}/{firstRunId}",
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.NoContent, releaseResponse.StatusCode);
+
+        var secondResponse = await AcquireLoadTestRunLease(client, secondRunId);
+        Assert.Equal(HttpStatusCode.Created, secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task LoadTestRunLease_CanBeRenewed_AndCannotBeReleasedByAnotherRun()
+    {
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        var anotherRunId = Guid.NewGuid();
+        await AcquireLoadTestRunLease(client, runId);
+
+        var renewalResponse = await client.PutAsJsonAsync(
+            $"{LoadTestRunsEndpoint}/{runId}",
+            new LoadTestRunLeaseRenewalRequest(600),
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.NoContent, renewalResponse.StatusCode);
+
+        var releaseResponse = await client.DeleteAsync(
+            $"{LoadTestRunsEndpoint}/{anotherRunId}",
+            TestContext.Current.CancellationToken
+        );
+        Assert.Equal(HttpStatusCode.Conflict, releaseResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task InitialiseLoadTestSession_IsIdempotentForTheLeaseOwner()
+    {
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        await AcquireLoadTestRunLease(client, runId);
+
+        var firstResponse = await client.PostAsJsonAsync(
+            LoadTestSessionsEndpoint,
+            new LoadTestSessionInitialisationRequest(runId, 1, 0),
+            TestContext.Current.CancellationToken
+        );
+        var secondResponse = await client.PostAsJsonAsync(
+            LoadTestSessionsEndpoint,
+            new LoadTestSessionInitialisationRequest(runId, 1, 0),
+            TestContext.Current.CancellationToken
+        );
+
+        firstResponse.EnsureSuccessStatusCode();
+        secondResponse.EnsureSuccessStatusCode();
+        var first = await firstResponse.Content.ReadFromJsonAsync<LoadTestSessionResponse>(
+            TestContext.Current.CancellationToken
+        );
+        var second = await secondResponse.Content.ReadFromJsonAsync<LoadTestSessionResponse>(
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.Equal(
+            first.Users.Single(user => user.UserId == DirectProducerUserId).Allocations.Single().OrganisationId,
+            second.Users.Single(user => user.UserId == DirectProducerUserId).Allocations.Single().OrganisationId
+        );
     }
 
     [Fact]
@@ -545,24 +663,20 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
     }
 
     [Fact]
-    public async Task InitialiseLoadTestSession_ReplacesThePreviousRun()
+    public async Task ReleaseLoadTestRunLease_RemovesItsOrganisationAllocations()
     {
         using var client = factory.CreateClient();
-        var (firstRunId, firstAllocation) = await InitialiseLoadTestSession(
+        var (firstRunId, _) = await InitialiseLoadTestSession(
             client,
             DirectProducerUserId,
             1,
             0
         );
-        var (secondRunId, secondAllocation) = await InitialiseLoadTestSession(
-            client,
-            DirectProducerUserId,
-            1,
-            0
+        var releaseResponse = await client.DeleteAsync(
+            $"{LoadTestRunsEndpoint}/{firstRunId}",
+            TestContext.Current.CancellationToken
         );
-
-        Assert.NotEqual(firstRunId, secondRunId);
-        Assert.NotEqual(firstAllocation.OrganisationId, secondAllocation.OrganisationId);
+        Assert.Equal(HttpStatusCode.NoContent, releaseResponse.StatusCode);
 
         using var staleRequest = new HttpRequestMessage(
             HttpMethod.Get,
@@ -739,7 +853,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private static async Task<(Guid RunId, LoadTestOrganisationAllocation Allocation)>
+    private async Task<(Guid RunId, LoadTestOrganisationAllocation Allocation)>
         InitialiseLoadTestSession(
             HttpClient client,
             Guid userId,
@@ -748,6 +862,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         )
     {
         var runId = Guid.NewGuid();
+        await AcquireLoadTestRunLease(client, runId);
         var response = await client.PostAsJsonAsync(
             LoadTestSessionsEndpoint,
             new LoadTestSessionInitialisationRequest(runId, userCount, userCount),
@@ -764,6 +879,22 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
             runId,
             Assert.Single(user.Allocations, candidate => candidate.UserIndex == userIndex)
         );
+    }
+
+    private async Task<HttpResponseMessage> AcquireLoadTestRunLease(HttpClient client, Guid runId)
+    {
+        var response = await client.PostAsJsonAsync(
+            LoadTestRunsEndpoint,
+            new LoadTestRunLeaseRequest(runId, "browser-load", 600),
+            TestContext.Current.CancellationToken
+        );
+
+        if (response.IsSuccessStatusCode)
+        {
+            _leasedRunIds.Add(runId);
+        }
+
+        return response;
     }
 
     private sealed record PersonEmailResponseModel
