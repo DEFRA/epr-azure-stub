@@ -55,7 +55,8 @@ Endpoints to replicate are:
 
 - /organisations/{id}
   - Available under the `/waste-organisations` route group in this stub.
-  - Return responses for the seeded direct producer and compliance scheme used to establish browser sessions, as well as organisation IDs allocated by `LoadTestSessionState`.
+  - Return responses for the seeded direct producer and compliance scheme used to establish browser sessions, the static `LargeProducer` and `ComplianceScheme` fixtures consumed by the K6 tests, and organisation IDs allocated by `LoadTestSessionState`.
+    - Preserve the names, trading names, registration type and registration years from the corresponding `waste-organisations-stub` fixture for the two static K6 IDs.
   - Also return every static organisation fixture under [`../epr-local-environment/compose/waste-organisations-seed/payloads/`](../epr-local-environment/compose/waste-organisations-seed/payloads/). The filename is the organisation ID; its JSON provides the name, trading name and registration type.
     - The Local Environment seeder writes each fixture for registration years 2025–2030. Keep the stub response registrations aligned with those years so `waste-obligations-seed` can create and query its seeded declarations when Waste Obligations is routed here.
     - `waste-organisations-seed` itself continues to PUT to the normal local `waste-organisations` service. This stub needs only the corresponding deterministic GET responses used downstream by Waste Obligations.

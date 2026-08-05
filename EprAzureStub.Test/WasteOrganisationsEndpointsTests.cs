@@ -154,6 +154,44 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
 
     [Theory]
     [InlineData(
+        WasteOrganisationStubIds.LargeProducer,
+        "Large Producer Ltd",
+        "LARGE_PRODUCER"
+    )]
+    [InlineData(
+        WasteOrganisationStubIds.ComplianceScheme,
+        "Large Producer Ltd",
+        "COMPLIANCE_SCHEME"
+    )]
+    public async Task GetOrganisation_ReturnsStaticK6Organisation(
+        string organisationId,
+        string expectedName,
+        string expectedRegistrationType
+    )
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{OrganisationsEndpoint}/{organisationId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var organisation = await response.Content.ReadFromJsonAsync<OrganisationResponseModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(organisation);
+        Assert.Equal(Guid.Parse(organisationId), organisation.Id);
+        Assert.Equal(expectedName, organisation.Name);
+        Assert.Equal("Large Producer Trading", organisation.TradingName);
+        Assert.All(
+            organisation.Registrations,
+            registration => Assert.Equal(expectedRegistrationType, registration.Type)
+        );
+    }
+
+    [Theory]
+    [InlineData(
         "07d0a580-ab20-4ee2-bd78-702a793b4d34",
         "EcoCircle Holdings",
         "COMPLIANCE_SCHEME"
