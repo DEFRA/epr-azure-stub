@@ -55,7 +55,7 @@ Endpoints to replicate are:
 
 - /organisations/{id}
   - Available under the `/waste-organisations` route group in this stub.
-  - Return a response only for an organisation ID allocated by `LoadTestSessionState`.
+  - Return responses for the seeded direct producer and compliance scheme used to establish browser sessions, as well as organisation IDs allocated by `LoadTestSessionState`.
   - The allocated direct producer returns a `LARGE_PRODUCER` registration; the allocated compliance scheme returns a `COMPLIANCE_SCHEME` registration and its numbered scheme name as `tradingName`.
   - The compliance operator organisation ID is not a Waste Organisations ID. It is only used to resolve the scheme through Account Service's `get-for-operator` endpoint.
   - Keep this endpoint backed by the same `LoadTestSessionState` as the Account Service and PRN stubs. Do not create an independent random allocation or depend on forwarding the load-test header from Waste Obligations.

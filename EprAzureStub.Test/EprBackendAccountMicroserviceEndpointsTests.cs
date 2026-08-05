@@ -407,7 +407,10 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         );
         Assert.All(
             complianceScheme.Allocations,
-            allocation => Assert.NotNull(allocation.OperatorOrganisationId)
+            allocation => Assert.Equal(
+                WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
+                allocation.OperatorOrganisationId
+            )
         );
         Assert.Equal(3, complianceScheme.Allocations.Count);
         Assert.Equal(3, complianceScheme.Allocations.Select(allocation => allocation.OrganisationId).Distinct().Count());
@@ -492,7 +495,10 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
             2,
             1
         );
-        Assert.NotNull(allocation.OperatorOrganisationId);
+        Assert.Equal(
+            WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
+            allocation.OperatorOrganisationId
+        );
 
         using var userRequest = new HttpRequestMessage(
             HttpMethod.Get,
@@ -511,12 +517,15 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         );
         Assert.NotNull(userBody);
         var organisation = Assert.Single(userBody.User.Organisations);
-        Assert.Equal(allocation.OperatorOrganisationId, organisation.Id);
+        Assert.Equal(
+            WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
+            organisation.Id
+        );
         Assert.Equal("Organisation Name 2", organisation.Name);
 
         using var schemeRequest = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={allocation.OperatorOrganisationId}"
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid}"
         );
         schemeRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:1");
 

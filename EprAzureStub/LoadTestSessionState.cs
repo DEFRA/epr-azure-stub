@@ -67,7 +67,10 @@ public sealed class LoadTestSessionState
                     ComplianceSchemeUserId,
                     userIndex,
                     Guid.NewGuid(),
-                    Guid.NewGuid(),
+                    // The signed-in CSO session owns this seeded operator organisation.
+                    // Keep it stable so the frontend does not need a load-test-specific
+                    // session override to resolve its organisation number.
+                    WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
                     $"Organisation Name {displayNumber}",
                     $"Compliance Scheme Name {displayNumber}"
                 )
@@ -165,7 +168,6 @@ public sealed class LoadTestSessionState
 
             allocation = _session.Allocations.SingleOrDefault(candidate =>
                 candidate.OrganisationId == organisationId
-                || candidate.OperatorOrganisationId == organisationId
             )!;
 
             return allocation is not null;

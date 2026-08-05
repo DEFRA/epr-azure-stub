@@ -23,20 +23,24 @@ public static class WasteOrganisationsEndpoints
             (Guid id, LoadTestSessionState loadTestSessionState) =>
             {
                 if (
-                    !loadTestSessionState.TryGetAllocationForOrganisation(
+                    loadTestSessionState.TryGetAllocationForOrganisation(
                         id,
                         out var allocation
                     )
                     // A compliance allocation also has an operator ID. It is used only by
                     // Account Service's get-for-operator call; the scheme ID is the Waste
                     // Organisations ID used by the frontend and Waste Obligations.
-                    || allocation.OrganisationId != id
+                    && allocation.OrganisationId == id
                 )
                 {
-                    return Results.NotFound();
+                    return Results.Ok(CreateOrganisationResponse(allocation));
                 }
 
-                return Results.Ok(CreateOrganisationResponse(allocation));
+                var seededOrganisation = CreateSeededOrganisationResponse(id);
+
+                return seededOrganisation is null
+                    ? Results.NotFound()
+                    : Results.Ok(seededOrganisation);
             }
         );
     }
@@ -61,6 +65,62 @@ public static class WasteOrganisationsEndpoints
             Address = new()
             {
                 AddressLine1 = allocation.OrganisationName,
+                AddressLine2 = "123 Street",
+                Town = "Town",
+                County = "County",
+                Postcode = "UK1",
+                Country = "UK",
+            },
+            Registrations = CreateRegistrations(registrationType),
+        };
+    }
+
+    private static OrganisationResponseModel? CreateSeededOrganisationResponse(Guid id)
+    {
+        return id switch
+        {
+            var seededDirectProducerId
+                when seededDirectProducerId
+                    == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
+                => CreateOrganisationResponse(
+                    id,
+                    "POP QUEST LTD",
+                    null,
+                    "17121895",
+                    "LARGE_PRODUCER"
+                ),
+            var seededComplianceSchemeId
+                when seededComplianceSchemeId
+                    == WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid
+                => CreateOrganisationResponse(
+                    id,
+                    "Organisation Name",
+                    "Compliance Scheme Name",
+                    "12345678",
+                    "COMPLIANCE_SCHEME"
+                ),
+            _ => null,
+        };
+    }
+
+    private static OrganisationResponseModel CreateOrganisationResponse(
+        Guid id,
+        string name,
+        string? tradingName,
+        string companiesHouseNumber,
+        string registrationType
+    )
+    {
+        return new()
+        {
+            Id = id,
+            Name = name,
+            TradingName = tradingName,
+            BusinessCountry = "GB-ENG",
+            CompaniesHouseNumber = companiesHouseNumber,
+            Address = new()
+            {
+                AddressLine1 = name,
                 AddressLine2 = "123 Street",
                 Town = "Town",
                 County = "County",

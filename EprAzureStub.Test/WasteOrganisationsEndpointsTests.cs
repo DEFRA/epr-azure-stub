@@ -94,6 +94,46 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
         );
     }
 
+    [Theory]
+    [InlineData(
+        WasteOrganisationStubIds.SeededDirectProducerOrganisation,
+        "POP QUEST LTD",
+        null,
+        "LARGE_PRODUCER"
+    )]
+    [InlineData(
+        WasteOrganisationStubIds.SeededComplianceSchemeExternalId,
+        "Organisation Name",
+        "Compliance Scheme Name",
+        "COMPLIANCE_SCHEME"
+    )]
+    public async Task GetOrganisation_ReturnsSeededOrganisationForAuthentication(
+        string organisationId,
+        string expectedName,
+        string? expectedTradingName,
+        string expectedRegistrationType
+    )
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync(
+            $"{OrganisationsEndpoint}/{organisationId}",
+            TestContext.Current.CancellationToken
+        );
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var organisation = await response.Content.ReadFromJsonAsync<OrganisationResponseModel>(
+            TestContext.Current.CancellationToken
+        );
+        Assert.NotNull(organisation);
+        Assert.Equal(expectedName, organisation.Name);
+        Assert.Equal(expectedTradingName, organisation.TradingName);
+        Assert.All(
+            organisation.Registrations,
+            registration => Assert.Equal(expectedRegistrationType, registration.Type)
+        );
+    }
+
     [Fact]
     public async Task GetOrganisation_ReturnsNotFound_ForUnknownOrOperatorOrganisationId()
     {
@@ -114,9 +154,14 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
             $"{OrganisationsEndpoint}/{allocation.OperatorOrganisationId}",
             TestContext.Current.CancellationToken
         );
+        var seededOperatorResponse = await client.GetAsync(
+            $"{OrganisationsEndpoint}/{WasteOrganisationStubIds.SeededComplianceSchemeOrganisation}",
+            TestContext.Current.CancellationToken
+        );
 
         Assert.Equal(HttpStatusCode.NotFound, unknownResponse.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, operatorResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, seededOperatorResponse.StatusCode);
     }
 
     private static async Task<LoadTestOrganisationAllocation> InitialiseLoadTestSession(
