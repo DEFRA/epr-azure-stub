@@ -182,6 +182,23 @@ public static class WasteOrganisationsEndpoints
                     "12345678",
                     "COMPLIANCE_SCHEME"
                 ),
+            var largeProducerId when largeProducerId == WasteOrganisationStubIds.LargeProducerGuid
+                => CreateOrganisationResponse(
+                    id,
+                    "Large Producer Ltd",
+                    "Large Producer Trading",
+                    "12345678",
+                    "LARGE_PRODUCER"
+                ),
+            var complianceSchemeId
+                when complianceSchemeId == WasteOrganisationStubIds.ComplianceSchemeGuid
+                => CreateOrganisationResponse(
+                    id,
+                    "Large Producer Ltd",
+                    "Large Producer Trading",
+                    "12345678",
+                    "COMPLIANCE_SCHEME"
+                ),
             _ => null,
         };
     }
