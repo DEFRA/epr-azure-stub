@@ -12,7 +12,12 @@ public static class EprBackendAccountMicroserviceEndpoints
 
         group.MapGet(
             "/api/organisations/person-emails",
-            ([FromQuery] Guid organisationId, [FromQuery] string? entityTypeCode, LoadTestSessionState loadTestSessionState) =>
+            (
+                [FromQuery] Guid organisationId,
+                [FromQuery] string? entityTypeCode,
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
+            ) =>
             {
                 if (organisationId == Guid.Empty)
                 {
@@ -28,6 +33,15 @@ public static class EprBackendAccountMicroserviceEndpoints
                     && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.DirectRegistrant)
                 )
                 {
+                    loggerFactory
+                        .CreateLogger(nameof(EprBackendAccountMicroserviceEndpoints))
+                        .LogInformation(
+                            "Load-test person-email mapping: organisation {OrganisationId} resolves to direct producer user {UserId}, allocation {LoadTestUserIndex}.",
+                            organisationId,
+                            loadTestAllocation.UserId,
+                            loadTestAllocation.UserIndex
+                        );
+
                     return Results.Ok(CreateSeededDirectProducerPersonEmailsResponse());
                 }
 
@@ -41,6 +55,15 @@ public static class EprBackendAccountMicroserviceEndpoints
                     && IsEntityTypeCode(entityTypeCode, EntityTypeCodes.ComplianceScheme)
                 )
                 {
+                    loggerFactory
+                        .CreateLogger(nameof(EprBackendAccountMicroserviceEndpoints))
+                        .LogInformation(
+                            "Load-test person-email mapping: compliance scheme {OrganisationId} resolves to compliance scheme user {UserId}, allocation {LoadTestUserIndex}.",
+                            organisationId,
+                            loadTestAllocation.UserId,
+                            loadTestAllocation.UserIndex
+                        );
+
                     return Results.Ok(CreateSeededComplianceSchemePersonEmailsResponse());
                 }
 
@@ -85,7 +108,8 @@ public static class EprBackendAccountMicroserviceEndpoints
             (
                 [FromQuery] Guid userId,
                 HttpRequest request,
-                LoadTestSessionState loadTestSessionState
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
             ) =>
             {
                 var loadTestSessionKey = GetLoadTestSessionKey(request);
@@ -106,6 +130,17 @@ public static class EprBackendAccountMicroserviceEndpoints
                     }
 
                     var loadTestUser = FindSeededUser(userId)!;
+                    loggerFactory
+                        .CreateLogger(nameof(EprBackendAccountMicroserviceEndpoints))
+                        .LogInformation(
+                            "Load-test account mapping: session {LoadTestSessionKey}, user {UserId}, allocation {LoadTestUserIndex} maps to organisation {OrganisationId} ({OrganisationName}) and operator {OperatorOrganisationId}.",
+                            loadTestSessionKey,
+                            userId,
+                            loadTestAllocation.UserIndex,
+                            loadTestAllocation.OrganisationId,
+                            loadTestAllocation.OrganisationName,
+                            loadTestAllocation.OperatorOrganisationId
+                        );
 
                     return Results.Ok(
                         CreateUserOrganisationsResponse(loadTestUser, loadTestAllocation)
@@ -123,7 +158,8 @@ public static class EprBackendAccountMicroserviceEndpoints
             (
                 [FromQuery] Guid organisationId,
                 HttpRequest request,
-                LoadTestSessionState loadTestSessionState
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
             ) =>
             {
                 if (organisationId == Guid.Empty)
@@ -147,6 +183,17 @@ public static class EprBackendAccountMicroserviceEndpoints
                             new { message = "Load test session is missing or does not match the operator." }
                         );
                     }
+
+                    loggerFactory
+                        .CreateLogger(nameof(EprBackendAccountMicroserviceEndpoints))
+                        .LogInformation(
+                            "Load-test compliance scheme mapping: session {LoadTestSessionKey}, operator organisation {OperatorOrganisationId}, allocation {LoadTestUserIndex} maps to compliance scheme {ComplianceSchemeId} ({ComplianceSchemeName}).",
+                            loadTestSessionKey,
+                            organisationId,
+                            loadTestAllocation.UserIndex,
+                            loadTestAllocation.OrganisationId,
+                            loadTestAllocation.ComplianceSchemeName
+                        );
 
                     return Results.Ok(CreateLoadTestComplianceSchemeResponse(loadTestAllocation));
                 }

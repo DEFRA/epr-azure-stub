@@ -12,7 +12,11 @@ public static class LoadTestControlEndpoints
 
         group.MapPost(
             "/load-test-sessions",
-            (LoadTestSessionInitialisationRequest request, LoadTestSessionState loadTestSessionState) =>
+            (
+                LoadTestSessionInitialisationRequest request,
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
+            ) =>
             {
                 if (request.RunId == Guid.Empty)
                 {
@@ -21,13 +25,21 @@ public static class LoadTestControlEndpoints
 
                 try
                 {
-                    return Results.Ok(
-                        loadTestSessionState.Initialise(
-                            request.RunId,
-                            request.DirectProducerUserCount,
-                            request.ComplianceSchemeUserCount
-                        )
+                    var response = loadTestSessionState.Initialise(
+                        request.RunId,
+                        request.DirectProducerUserCount,
+                        request.ComplianceSchemeUserCount
                     );
+                    loggerFactory
+                        .CreateLogger(nameof(LoadTestControlEndpoints))
+                        .LogInformation(
+                            "Initialised load-test organisation mappings for run {LoadTestRunId}: {DirectProducerUserCount} direct producer and {ComplianceSchemeUserCount} compliance scheme users.",
+                            response.RunId,
+                            response.DirectProducerUserCount,
+                            response.ComplianceSchemeUserCount
+                        );
+
+                    return Results.Ok(response);
                 }
                 catch (ArgumentOutOfRangeException)
                 {

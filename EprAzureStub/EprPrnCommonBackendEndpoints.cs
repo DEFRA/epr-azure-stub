@@ -19,7 +19,8 @@ public static class EprPrnCommonBackendEndpoints
             (
                 int year,
                 [FromHeader(Name = OrganisationHeader)] Guid? organisationId,
-                LoadTestSessionState loadTestSessionState
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
             ) =>
             {
                 if (year is < StartYear or > EndYear)
@@ -39,6 +40,18 @@ public static class EprPrnCommonBackendEndpoints
                     )
                 )
                 {
+                    loggerFactory
+                        .CreateLogger(nameof(EprPrnCommonBackendEndpoints))
+                        .LogInformation(
+                            "Load-test PRN mapping: organisation {OrganisationId} maps to {OrganisationType} allocation {LoadTestUserIndex} for obligation year {ObligationYear}.",
+                            organisationId.Value,
+                            loadTestAllocation.IsComplianceScheme
+                                ? "compliance scheme"
+                                : "direct producer",
+                            loadTestAllocation.UserIndex,
+                            year
+                        );
+
                     return loadTestAllocation.IsComplianceScheme
                         ? Results.Ok(CreateComplianceSchemeResponse(organisationId.Value))
                         : Results.Ok(CreateLargeProducerResponse(organisationId.Value));

@@ -70,7 +70,12 @@ public static class WasteOrganisationsEndpoints
 
         group.MapGet(
             "/organisations/{id:guid}",
-            (Guid id, LoadTestSessionState loadTestSessionState) =>
+            (
+                Guid id,
+                HttpRequest request,
+                LoadTestSessionState loadTestSessionState,
+                ILoggerFactory loggerFactory
+            ) =>
             {
                 if (
                     loadTestSessionState.TryGetAllocationForOrganisation(
@@ -83,6 +88,23 @@ public static class WasteOrganisationsEndpoints
                     && allocation.OrganisationId == id
                 )
                 {
+                    var loadTestSessionKey = request.Headers.TryGetValue(
+                        LoadTestSessionState.SessionHeaderName,
+                        out var headerValue
+                    )
+                        ? headerValue.ToString()
+                        : null;
+                    loggerFactory
+                        .CreateLogger(nameof(WasteOrganisationsEndpoints))
+                        .LogInformation(
+                            "Load-test waste organisation mapping: session {LoadTestSessionKey}, organisation {OrganisationId} maps to {OrganisationName} for {OrganisationType} allocation {LoadTestUserIndex}.",
+                            loadTestSessionKey,
+                            allocation.OrganisationId,
+                            allocation.OrganisationName,
+                            allocation.IsComplianceScheme ? "compliance scheme" : "direct producer",
+                            allocation.UserIndex
+                        );
+
                     return Results.Ok(CreateOrganisationResponse(allocation));
                 }
 
