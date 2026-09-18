@@ -4,18 +4,18 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: write
-  pull-requests: write
-
-env:
-  AWS_REGION: eu-west-2
-  AWS_ACCOUNT_ID: "094954420758"
+  contents: read
 
 jobs:
   build:
     name: CDP-build-hotfix-workflow
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Create the release tag.
+      id-token: write # Authenticate to AWS using OIDC.
+    env:
+      AWS_REGION: eu-west-2
+      AWS_ACCOUNT_ID: "094954420758"
     steps:
       - name: Check out code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
