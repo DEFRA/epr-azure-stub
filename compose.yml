@@ -3,7 +3,7 @@ services:
   # floci is a replacement for localstack. It emulates AWS resources (sqs, sns, s3 etc) for local development
   # See: https://floci.io for more details
   floci:
-    image: hectorvent/floci:latest-aws
+    image: hectorvent/floci:latest-aws@sha256:5763c164919c2fb269e1121901a5642efc8b6516eebaeec813d18033f1d360f0
     ports:
       - '4566:4566'
     env_file:
@@ -16,14 +16,14 @@ services:
       - cdp-tenant
 
   redis:
-    image: redis:7.2.3-alpine3.18
+    image: redis:7.2.3-alpine3.18@sha256:3ce533b2b057f74b235d1d8697ae08b1b6ff0a5e16827ea6a377b6365693c7ed
     ports:
       - '6379:6379'
     networks:
       - cdp-tenant
 
   mongodb:
-    image: mongo:7.0.28
+    image: mongo:7.0.28@sha256:4510cf3d7050003e958745adb25d2deb3fb907430716162d9cc1a92eda2a6047
     networks:
       - cdp-tenant
     ports:
