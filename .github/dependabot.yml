@@ -9,17 +9,50 @@ updates:
       time: '10:30'
       timezone: 'Europe/London'
     groups:
-      # Group all patch updates into a single PR
-      patch-updates:
+      nuget-test-support:
         applies-to: version-updates
+        patterns:
+          - 'Microsoft.AspNetCore.Mvc.Testing'
+          - 'Microsoft.NET.Test.Sdk'
+          - 'NSubstitute'
+          - 'xunit*'
         update-types:
+          - 'minor'
           - 'patch'
-      # Minor updates will be created individually (ungrouped)
-      # Major updates will be created individually (ungrouped)
-      # No specific configuration needed for major updates as they'll be handled separately
+      nuget-observability:
+        applies-to: version-updates
+        patterns:
+          - 'Elastic.*'
+          - 'Serilog.*'
+        update-types:
+          - 'minor'
+          - 'patch'
 
   - package-ecosystem: github-actions
     directory: /
+    schedule:
+      interval: weekly
+      time: '10:30'
+      timezone: 'Europe/London'
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      time: '10:30'
+      timezone: 'Europe/London'
+
+  - package-ecosystem: docker-compose
+    directory: /
+    ignore:
+      # Keep Mongo on its existing major version while allowing minor and patch updates.
+      - dependency-name: 'mongo'
+        update-types:
+          - 'version-update:semver-major'
     schedule:
       interval: weekly
       time: '10:30'
