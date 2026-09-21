@@ -34,7 +34,8 @@ GET /health
 Run the full test suite with:
 
 ```bash
-dotnet test
+dotnet build EprAzureStub.Test
+dotnet test --test-modules EprAzureStub.Test/bin/Debug/net10.0/EprAzureStub.Test.dll --no-build
 ```
 
 ## Docker Compose
