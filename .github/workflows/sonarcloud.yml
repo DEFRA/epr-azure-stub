@@ -4,9 +4,12 @@ on:
   workflow_call:
 
 permissions:
-  id-token: write
   contents: read
-  pull-requests: write
+  pull-requests: read
+
+env:
+  SONAR_SCANNER_VERSION: 11.3.0
+  DOTNET_COVERAGE_VERSION: 18.11.2
 
 jobs:
   build:
@@ -15,49 +18,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           java-version: 17
           distribution: "zulu"
       - name: Check out code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - name: Set up .NET 8.0
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: |
             10.0
       - name: Cache SonarCloud packages
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ~/sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
       - name: Cache SonarCloud scanner
         id: cache-sonar-scanner
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ./.sonar/scanner
-          key: ${{ runner.os }}-sonar-scanner
-          restore-keys: ${{ runner.os }}-sonar-scanner
+          key: ${{ runner.os }}-sonar-scanner-${{ env.SONAR_SCANNER_VERSION }}
       - name: Cache dotNet code coverage
         id: cache-sonar-coverage
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ./.sonar/coverage
-          key: ${{ runner.os }}-sonar-coverage
-          restore-keys: ${{ runner.os }}-sonar-coverage
+          key: ${{ runner.os }}-sonar-coverage-${{ env.DOTNET_COVERAGE_VERSION }}
       - name: Install SonarCloud scanner
         if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.sonar/scanner
-          dotnet tool update dotnet-sonarscanner --tool-path ./.sonar/scanner
+          dotnet tool install dotnet-sonarscanner --version "$SONAR_SCANNER_VERSION" --tool-path ./.sonar/scanner
       - name: Install dotNet code coverage
         if: steps.cache-sonar-coverage.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.sonar/coverage
-          dotnet tool update dotnet-coverage --tool-path ./.sonar/coverage
+          dotnet tool install dotnet-coverage --version "$DOTNET_COVERAGE_VERSION" --tool-path ./.sonar/coverage
       - name: Build and analyze
         if: github.actor != 'dependabot[bot]'
         env:
