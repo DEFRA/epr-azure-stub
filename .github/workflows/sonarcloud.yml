@@ -9,7 +9,6 @@ permissions:
 
 env:
   SONAR_SCANNER_VERSION: 11.3.0
-  DOTNET_COVERAGE_VERSION: 18.11.2
 
 jobs:
   build:
@@ -43,22 +42,11 @@ jobs:
         with:
           path: ./.sonar/scanner
           key: ${{ runner.os }}-sonar-scanner-${{ env.SONAR_SCANNER_VERSION }}
-      - name: Cache dotNet code coverage
-        id: cache-sonar-coverage
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ./.sonar/coverage
-          key: ${{ runner.os }}-sonar-coverage-${{ env.DOTNET_COVERAGE_VERSION }}
       - name: Install SonarCloud scanner
         if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.sonar/scanner
           dotnet tool install dotnet-sonarscanner --version "$SONAR_SCANNER_VERSION" --tool-path ./.sonar/scanner
-      - name: Install dotNet code coverage
-        if: steps.cache-sonar-coverage.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ./.sonar/coverage
-          dotnet tool install dotnet-coverage --version "$DOTNET_COVERAGE_VERSION" --tool-path ./.sonar/coverage
       - name: Build and analyze
         if: github.actor != 'dependabot[bot]'
         env:
@@ -67,5 +55,5 @@ jobs:
         run: |
           ./.sonar/scanner/dotnet-sonarscanner begin /k:"DEFRA_cdp-dotnet-backend-template" /o:"defra" /d:sonar.token="${{ secrets.SONAR_TOKEN }}" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.cs.vscoveragexml.reportsPaths=coverage.xml
           dotnet build --no-incremental
-          ./.sonar/coverage/dotnet-coverage collect "dotnet test" -f xml -o "coverage.xml"
+          dotnet test --test-modules EprAzureStub.Test/bin/Debug/net10.0/EprAzureStub.Test.dll --no-build --coverage --coverage-output-format xml --coverage-output "coverage.xml"
           ./.sonar/scanner/dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"

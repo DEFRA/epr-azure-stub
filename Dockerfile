@@ -3,7 +3,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:2fa828c68761b1b8c23d7662dc134421b9
 WORKDIR /src
 COPY . .
 WORKDIR "/src"
-RUN dotnet test EprAzureStub.Test
+RUN dotnet build EprAzureStub.Test --warnaserror && \
+    dotnet test --test-modules EprAzureStub.Test/bin/Debug/net10.0/EprAzureStub.Test.dll --no-build
 RUN dotnet publish EprAzureStub -c Release -o /app/publish /p:UseAppHost=false
 
 # Final production image

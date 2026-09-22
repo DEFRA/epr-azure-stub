@@ -60,7 +60,7 @@ Endpoints to replicate are:
   - Also return every static organisation fixture under [`../epr-local-environment/compose/waste-organisations-seed/payloads/`](../epr-local-environment/compose/waste-organisations-seed/payloads/). The filename is the organisation ID; its JSON provides the name, trading name and registration type.
     - The Local Environment seeder writes each fixture for registration years 2025–2030. Keep the stub response registrations aligned with those years so `waste-obligations-seed` can create and query its seeded declarations when Waste Obligations is routed here.
     - `waste-organisations-seed` itself continues to PUT to the normal local `waste-organisations` service. This stub needs only the corresponding deterministic GET responses used downstream by Waste Obligations.
-    - When fixtures change, refresh `LocalEnvironmentSeededOrganisations` in `EprAzureStub/WasteOrganisationsEndpoints.cs`, update `GetOrganisation_ReturnsOrganisationSeededByLocalEnvironment` in `EprAzureStub.Test/WasteOrganisationsEndpointsTests.cs`, and run `dotnet test`.
+    - When fixtures change, refresh `LocalEnvironmentSeededOrganisations` in `EprAzureStub/WasteOrganisationsEndpoints.cs`, update `GetOrganisation_ReturnsOrganisationSeededByLocalEnvironment` in `EprAzureStub.Test/WasteOrganisationsEndpointsTests.cs`, then run `dotnet build EprAzureStub.Test` followed by `dotnet test --test-modules EprAzureStub.Test/bin/Debug/net10.0/EprAzureStub.Test.dll --no-build`.
   - The allocated direct producer returns a `LARGE_PRODUCER` registration; the allocated compliance scheme returns a `COMPLIANCE_SCHEME` registration and its numbered scheme name as `tradingName`.
   - The compliance operator organisation ID is not a Waste Organisations ID. It is only used to resolve the scheme through Account Service's `get-for-operator` endpoint.
   - Keep this endpoint backed by the same `LoadTestSessionState` as the Account Service and PRN stubs. Do not create an independent random allocation or depend on forwarding the load-test header from Waste Obligations.
@@ -112,7 +112,7 @@ These routes are specific to this stub and do not replicate an upstream service 
 - Use nullable-aware C# and keep response DTOs explicit when they make the stub response shape easier to understand.
 - Add or update tests in `EprAzureStub.Test` for each stub variant added.
 - Tests should exercise the HTTP surface using `Microsoft.AspNetCore.Mvc.Testing`, including expected status codes, required headers/query parameters, and response body shape.
-- Run `dotnet test` before considering endpoint work complete.
+- Before considering endpoint work complete, run `dotnet build EprAzureStub.Test` followed by `dotnet test --test-modules EprAzureStub.Test/bin/Debug/net10.0/EprAzureStub.Test.dll --no-build`.
 
 ## Supporting repository references
 
