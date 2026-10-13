@@ -29,7 +29,7 @@ public static class LoadTestControlEndpoints
             }
             catch (ArgumentOutOfRangeException)
             {
-                return Results.BadRequest(new { message = "Require 1–1000 initial organisations, years 2023–2050, interval 1–86400 seconds, nonnegative growth and initial plus growth at most 1000." });
+                return Results.BadRequest(new { message = $"Require positive initial organisations, years 2023–2050, intervals 1–86400 seconds, nonnegative growth and initial plus growth at most {state.MaximumOrganisationCount}." });
             }
         });
         group.MapGet("/load-test-polling/{runId:guid}", (Guid runId, LoadTestSessionState state) =>
@@ -187,7 +187,7 @@ public static class LoadTestControlEndpoints
                 catch (ArgumentOutOfRangeException)
                 {
                     return Results.BadRequest(
-                        new { message = "The total user count must be between 1 and 1000." }
+                        new { message = $"The total user count must be between 1 and {loadTestSessionState.MaximumOrganisationCount}." }
                     );
                 }
             }

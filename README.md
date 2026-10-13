@@ -50,14 +50,17 @@ and the browser session allocations together:
   "directProducerUserCount": 125,
   "complianceSchemeUserCount": 375,
   "registrationYears": [2025, 2026, 2027, 2028, 2029, 2030],
-  "changeIntervalSeconds": 300,
+  "organisationGrowthIntervalSeconds": 1800,
+  "obligationChangeIntervalSeconds": 1800,
   "maximumAdditionalOrganisations": 288
 }
 ```
 
-The initial count is the total across both types. It must be 1–1000; initial
-count plus growth cannot exceed 1000. Years must be 2023–2050, growth must be
-nonnegative, and the interval must be 1–86400 seconds. Duplicate years are
+The initial count is the total across both types. Initial count plus maximum
+growth must fit `LoadTest__MaxOrganisationCount` (100000 by default, configurable
+1–1000000). This bound applies to session-only allocations too, with count sums
+validated before allocation. Years must be 2023–2050, growth must be
+nonnegative, and each interval must be 1–86400 seconds. Duplicate years are
 normalised. Repeating the same request keeps IDs and clocks; a changed
 configuration returns 409. GET `/admin/load-test-polling/{runId}` reports the
 current catalogue and start time. Legacy session-only initialisation is unchanged.
@@ -68,13 +71,17 @@ so downstream refreshes can replace the previous generated catalogue.
 Its IDs join detail responses, Account bulk lookups, person recipients, session
 lookups and PRN calculations. One extra organisation appears per interval from
 initialisation, with missed intervals caught up on the next request and growth
-capped. Initial browser session allocations stay fixed. Compliance schemes
+capped. The growth period defaults to 1800 seconds. Initial browser session
+allocations stay fixed, including a 750-organisation pool. Compliance schemes
 share the seeded Account operator; that operator is not a Waste Organisations ID.
 
-Each organisation/year starts its PRN clock on its first PRN request. Accepted
-tonnage, outstanding tonnage and status alternate between the fixture values
-and a fully met state each interval. Discovery and Account reads do not start
-those clocks. Releasing or expiring the run lease clears the catalogue and clocks.
+Each organisation/year starts its PRN clock on its first PRN request. Its independent
+change period defaults to 1800 seconds. Numeric obligations increase by phase while
+accepted/outstanding tonnage and status remain coherent across met/unmet phases,
+so skipping several intervals still produces changed values. Phase zero and legacy
+fixture responses stay unchanged. Discovery and Account reads do not start those
+clocks. `changeIntervalSeconds` remains a compatibility fallback for either new
+period that is omitted. Releasing or expiring the lease clears the catalogue and clocks.
 
 Restrict `/admin/load-test-runs`, `/admin/load-test-sessions` and
 `/admin/load-test-polling` to the performance runner at ingress. All state is

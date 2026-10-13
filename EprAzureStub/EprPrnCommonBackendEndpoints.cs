@@ -58,16 +58,23 @@ public static class EprPrnCommonBackendEndpoints
                     var response = loadTestAllocation.IsComplianceScheme
                         ? CreateComplianceSchemeResponse(organisationId.Value)
                         : CreateLargeProducerResponse(organisationId.Value);
-                    if (simulated && phase % 2 == 1)
+                    if (simulated && phase > 0)
                         response = response with
                         {
-                            NumberOfPrnsAwaitingAcceptance = 0,
-                            ObligationData = response.ObligationData.Select(material => material with
+                            NumberOfPrnsAwaitingAcceptance = phase % 2 == 1 ? 0 : 1,
+                            ObligationData = response.ObligationData.Select(material =>
                             {
-                                TonnageAwaitingAcceptance = 0,
-                                TonnageAccepted = material.ObligationToMeet ?? 0,
-                                TonnageOutstanding = 0,
-                                Status = "Met"
+                                var obligation = (material.ObligationToMeet ?? 0) + phase * 5;
+                                var outstanding = phase % 2 == 1 ? 0 : 10 + phase;
+                                return material with
+                                {
+                                    Tonnage = material.Tonnage + phase * 10,
+                                    ObligationToMeet = obligation,
+                                    TonnageAwaitingAcceptance = outstanding,
+                                    TonnageAccepted = obligation - outstanding,
+                                    TonnageOutstanding = outstanding,
+                                    Status = outstanding == 0 ? "Met" : "NotMet"
+                                };
                             }).ToArray()
                         };
                     return Results.Ok(response);

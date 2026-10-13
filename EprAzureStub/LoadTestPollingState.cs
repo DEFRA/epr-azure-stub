@@ -8,17 +8,20 @@ public sealed partial class LoadTestSessionState
     {
         var years = request.RegistrationYears?.Distinct().Order().ToArray() ?? [];
         var count = (long)request.DirectProducerUserCount + request.ComplianceSchemeUserCount;
+        var growthInterval = request.OrganisationGrowthIntervalSeconds ?? request.ChangeIntervalSeconds ?? 1800;
+        var obligationInterval = request.ObligationChangeIntervalSeconds ?? request.ChangeIntervalSeconds ?? 1800;
         if (request.RunId == Guid.Empty || request.DirectProducerUserCount < 0
-            || request.ComplianceSchemeUserCount < 0 || count is < 1 or > 1000
+            || request.ComplianceSchemeUserCount < 0 || count < 1 || count > MaximumOrganisationCount
             || years.Length == 0 || years.Any(year => year is < 2023 or > 2050)
-            || request.ChangeIntervalSeconds is < 1 or > 86400
+            || growthInterval is < 1 or > 86400 || obligationInterval is < 1 or > 86400
             || request.MaximumAdditionalOrganisations < 0
-            || count + request.MaximumAdditionalOrganisations > 1000)
+            || count + request.MaximumAdditionalOrganisations > MaximumOrganisationCount)
         {
             throw new ArgumentOutOfRangeException(nameof(request));
         }
 
-        request = request with { RegistrationYears = years };
+        request = request with { RegistrationYears = years, ChangeIntervalSeconds = null,
+            OrganisationGrowthIntervalSeconds = growthInterval, ObligationChangeIntervalSeconds = obligationInterval };
         lock (_sync)
         {
             ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
@@ -31,7 +34,8 @@ public sealed partial class LoadTestSessionState
                 var previous = _polling.Request;
                 if (previous.DirectProducerUserCount != request.DirectProducerUserCount
                     || previous.ComplianceSchemeUserCount != request.ComplianceSchemeUserCount
-                    || previous.ChangeIntervalSeconds != request.ChangeIntervalSeconds
+                    || previous.OrganisationGrowthIntervalSeconds != request.OrganisationGrowthIntervalSeconds
+                    || previous.ObligationChangeIntervalSeconds != request.ObligationChangeIntervalSeconds
                     || previous.MaximumAdditionalOrganisations != request.MaximumAdditionalOrganisations
                     || !previous.RegistrationYears.SequenceEqual(years))
                 {
@@ -76,8 +80,14 @@ public sealed partial class LoadTestSessionState
         }
     }
 
-    public IReadOnlyList<int> GetRegistrationYears() => GetPollingStatus(_runLease?.RunId ?? Guid.Empty)?.RegistrationYears
-        ?? Enumerable.Range(2025, 6).ToArray();
+    public IReadOnlyList<int> GetRegistrationYears()
+    {
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
+            return _polling?.Request.RegistrationYears.ToArray() ?? Enumerable.Range(2025, 6).ToArray();
+        }
+    }
 
     public bool TryGetPrnPhase(Guid organisationId, int year, out int phase)
     {
@@ -93,7 +103,7 @@ public sealed partial class LoadTestSessionState
             var now = timeProvider.GetUtcNow();
             if (!_polling.FirstPrnReads.TryGetValue(key, out var firstRead))
                 _polling.FirstPrnReads[key] = firstRead = now;
-            phase = (int)((now - firstRead).TotalSeconds / _polling.Request.ChangeIntervalSeconds);
+            phase = (int)((now - firstRead).TotalSeconds / _polling.Request.ObligationChangeIntervalSeconds!.Value);
             return true;
         }
     }
@@ -113,13 +123,13 @@ public sealed partial class LoadTestSessionState
         var request = _polling.Request;
         var initialCount = request.DirectProducerUserCount + request.ComplianceSchemeUserCount;
         var growth = Math.Min(request.MaximumAdditionalOrganisations,
-            (int)((timeProvider.GetUtcNow() - _polling.StartedAtUtc).TotalSeconds / request.ChangeIntervalSeconds));
+            (int)((timeProvider.GetUtcNow() - _polling.StartedAtUtc).TotalSeconds / request.OrganisationGrowthIntervalSeconds!.Value));
         while (_polling.Allocations.Count < initialCount + growth)
         {
             var additionalIndex = _polling.Allocations.Count - initialCount;
             var scheme = request.DirectProducerUserCount == 0
                 || (request.ComplianceSchemeUserCount > 0 && additionalIndex % 2 == 1);
-            var index = _polling.Allocations.Count(allocation => allocation.IsComplianceScheme == scheme);
+            var index = scheme ? _polling.NextComplianceSchemeIndex++ : _polling.NextDirectProducerIndex++;
             _polling.Allocations.Add(new(scheme ? ComplianceSchemeUserId : DirectProducerUserId, index,
                 Guid.NewGuid(), scheme ? WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid : null,
                 scheme ? $"Organisation Name {index + 1}" : $"POP QUEST LTD {index + 1}",
@@ -131,12 +141,15 @@ public sealed partial class LoadTestSessionState
         List<LoadTestOrganisationAllocation> Allocations)
     {
         public Dictionary<(Guid OrganisationId, int Year), DateTimeOffset> FirstPrnReads { get; } = [];
+        public int NextDirectProducerIndex { get; set; } = Request.DirectProducerUserCount;
+        public int NextComplianceSchemeIndex { get; set; } = Request.ComplianceSchemeUserCount;
     }
 }
 
 public sealed record LoadTestPollingRequest(Guid RunId, int DirectProducerUserCount,
-    int ComplianceSchemeUserCount, int[] RegistrationYears, int ChangeIntervalSeconds = 300,
-    int MaximumAdditionalOrganisations = 288);
+    int ComplianceSchemeUserCount, int[] RegistrationYears, int? ChangeIntervalSeconds = null,
+    int MaximumAdditionalOrganisations = 288, int? OrganisationGrowthIntervalSeconds = null,
+    int? ObligationChangeIntervalSeconds = null);
 
 public sealed record LoadTestPollingResponse(Guid RunId, DateTimeOffset StartedAtUtc,
     IReadOnlyList<int> RegistrationYears, int InitialOrganisationCount,

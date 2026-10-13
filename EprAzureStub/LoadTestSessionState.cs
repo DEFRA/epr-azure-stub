@@ -1,10 +1,12 @@
+using Microsoft.Extensions.Options;
+
 namespace EprAzureStub;
 
-public sealed partial class LoadTestSessionState(TimeProvider timeProvider)
+public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOptions<LoadTestOptions> options)
 {
     public const string SessionHeaderName = "X-EPR-Load-Test-Session";
 
-    private const int MaximumUserCount = 1000;
+    public int MaximumOrganisationCount => options.Value.MaxOrganisationCount;
     public const int MinimumLeaseDurationSeconds = 60;
     public const int MaximumLeaseDurationSeconds = 86_400;
     public static readonly Guid ComplianceSchemeUserId = Guid.Parse(
@@ -105,17 +107,17 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider)
         int complianceSchemeUserCount
     )
     {
-        var totalUserCount = directProducerUserCount + complianceSchemeUserCount;
+        var totalUserCount = (long)directProducerUserCount + complianceSchemeUserCount;
 
         if (
             directProducerUserCount < 0
             || complianceSchemeUserCount < 0
-            || totalUserCount is < 1 or > MaximumUserCount
+            || totalUserCount < 1 || totalUserCount > MaximumOrganisationCount
         )
         {
             throw new ArgumentOutOfRangeException(
                 nameof(totalUserCount),
-                $"The total user count must be between 1 and {MaximumUserCount}."
+                $"The total user count must be between 1 and {MaximumOrganisationCount}."
             );
         }
 
@@ -135,7 +137,7 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider)
 
             var session = new LoadTestSession(
                 runId,
-                totalUserCount,
+                (int)totalUserCount,
                 directProducerUserCount,
                 complianceSchemeUserCount,
                 CreateAllocations(directProducerUserCount, complianceSchemeUserCount)

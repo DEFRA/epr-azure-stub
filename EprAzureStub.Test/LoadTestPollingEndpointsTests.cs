@@ -164,12 +164,63 @@ public class LoadTestPollingEndpointsTests
         Assert.Equal(before.ToString(), (await Prn(id, 2030)).ToString());
         Assert.Equal(1, (await Prn(catalogue.Allocations[1].OrganisationId, 2026)).GetProperty("numberOfPrnsAwaitingAcceptance").GetInt32());
         clock.Advance(300);
-        Assert.Equal(before.ToString(), (await Prn(id, 2026)).ToString());
+        var phase2 = await Prn(id, 2026);
+        Assert.NotEqual(before.ToString(), phase2.ToString());
+        Assert.Equal("NotMet", phase2.GetProperty("obligationData")[0].GetProperty("status").GetString());
         clock.Advance(300);
-        Assert.Equal(changed.ToString(), (await Prn(id, 2026)).ToString());
+        Assert.NotEqual(changed.ToString(), (await Prn(id, 2026)).ToString());
         clock.Advance(2700);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/admin/load-test-polling/{runId}", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{id}", TestContext.Current.CancellationToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task SeparateIntervals_Support750PlusGrowthPast1000_AndSkippedPrnPeriodsChangeValues()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        await client.PostAsJsonAsync("/admin/load-test-runs", new LoadTestRunLeaseRequest(runId, "unsubmitted", 86400), TestContext.Current.CancellationToken);
+        var request = new LoadTestPollingRequest(runId, 250, 500, [2026], MaximumAdditionalOrganisations: 288,
+            OrganisationGrowthIntervalSeconds: 1, ObligationChangeIntervalSeconds: 10);
+        var response = await client.PostAsJsonAsync("/admin/load-test-polling", request, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var catalogue = (await response.Content.ReadFromJsonAsync<LoadTestPollingResponse>(TestContext.Current.CancellationToken))!;
+        client.DefaultRequestHeaders.Add("X-EPR-ORGANISATION", catalogue.Allocations[0].OrganisationId.ToString());
+        var before = await Read(client, "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2026");
+        clock.Advance(9);
+        Assert.Equal(before.ToString(), (await Read(client, "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2026")).ToString());
+        Assert.Equal(759, (await Read(client, $"/admin/load-test-polling/{runId}")).GetProperty("allocations").GetArrayLength());
+        clock.Advance(11);
+        var phase2 = await Read(client, "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2026");
+        Assert.NotEqual(before.ToString(), phase2.ToString());
+        Assert.Equal("NotMet", phase2.GetProperty("obligationData")[0].GetProperty("status").GetString());
+        clock.Advance(268);
+        Assert.Equal(1038, (await Read(client, $"/admin/load-test-polling/{runId}")).GetProperty("allocations").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task ConfiguredBound_RejectsOversizedAndOverflowingCounts_BeforeAllocating()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock).WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+            services.AddSingleton<Microsoft.Extensions.Options.IOptions<LoadTestOptions>>(
+                Microsoft.Extensions.Options.Options.Create(new LoadTestOptions { MaxOrganisationCount = 750 }))));
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        await client.PostAsJsonAsync("/admin/load-test-runs", new LoadTestRunLeaseRequest(runId, "unsubmitted", 3600), TestContext.Current.CancellationToken);
+        foreach (var counts in new[] { (751, 0), (int.MaxValue, int.MaxValue), (int.MaxValue, -1) })
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/admin/load-test-sessions",
+                new LoadTestSessionInitialisationRequest(runId, counts.Item1, counts.Item2), TestContext.Current.CancellationToken)).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/admin/load-test-polling",
+                new LoadTestPollingRequest(runId, counts.Item1, counts.Item2, [2026], MaximumAdditionalOrganisations: 0), TestContext.Current.CancellationToken)).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync("/admin/load-test-polling",
+            new LoadTestPollingRequest(runId, 250, 500, [2026], MaximumAdditionalOrganisations: 1), TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync("/admin/load-test-polling",
+            new LoadTestPollingRequest(runId, 250, 500, [2026], MaximumAdditionalOrganisations: 0), TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Theory]
