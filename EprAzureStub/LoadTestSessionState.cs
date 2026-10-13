@@ -1,6 +1,6 @@
 namespace EprAzureStub;
 
-public sealed class LoadTestSessionState
+public sealed partial class LoadTestSessionState(TimeProvider timeProvider)
 {
     public const string SessionHeaderName = "X-EPR-Load-Test-Session";
 
@@ -29,7 +29,7 @@ public sealed class LoadTestSessionState
         int leaseDurationSeconds
     )
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
         var expiresAtUtc = now.AddSeconds(leaseDurationSeconds);
 
         lock (_sync)
@@ -54,7 +54,7 @@ public sealed class LoadTestSessionState
 
     public bool RenewRunLease(Guid runId, int leaseDurationSeconds)
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
 
         lock (_sync)
         {
@@ -72,7 +72,7 @@ public sealed class LoadTestSessionState
 
     public LoadTestRunLeaseReleaseResult ReleaseRunLease(Guid runId)
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
 
         lock (_sync)
         {
@@ -89,6 +89,7 @@ public sealed class LoadTestSessionState
             }
 
             _runLease = null;
+            _polling = null;
             if (_session?.RunId == runId)
             {
                 _session = null;
@@ -120,7 +121,7 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_runLease?.RunId != runId)
             {
@@ -160,14 +161,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_session?.RunId != runId)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            GrowCatalogue();
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.UserId == userId && candidate.UserIndex == userIndex
             )!;
 
@@ -190,14 +192,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_session?.RunId != runId)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            GrowCatalogue();
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.UserId == ComplianceSchemeUserId
                 && candidate.UserIndex == userIndex
                 && candidate.OperatorOrganisationId == operatorOrganisationId
@@ -216,14 +219,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
+            GrowCatalogue();
 
             if (_session is null)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.OrganisationId == organisationId
             )!;
 
@@ -299,6 +303,7 @@ public sealed class LoadTestSessionState
         {
             _runLease = null;
             _session = null;
+            _polling = null;
         }
     }
 

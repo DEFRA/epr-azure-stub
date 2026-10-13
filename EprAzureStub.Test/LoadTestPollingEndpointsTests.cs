@@ -1,0 +1,187 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
+namespace EprAzureStub.Test;
+
+public class LoadTestPollingEndpointsTests
+{
+    private sealed class MutableTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(int seconds) => _now = _now.AddSeconds(seconds);
+    }
+
+    private static WebApplicationFactory<Program> Factory(MutableTimeProvider clock) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
+        {
+            services.RemoveAll<TimeProvider>();
+            services.AddSingleton<TimeProvider>(clock);
+        }));
+
+    private static async Task<LoadTestPollingResponse> Initialise(HttpClient client, Guid runId, int growth = 2)
+    {
+        var lease = await client.PostAsJsonAsync("/admin/load-test-runs", new LoadTestRunLeaseRequest(runId, "unsubmitted-journey", 3600), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, lease.StatusCode);
+        var response = await client.PostAsJsonAsync("/admin/load-test-polling", new LoadTestPollingRequest(runId, 125, 375, [2025, 2026, 2030], 300, growth), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return (await response.Content.ReadFromJsonAsync<LoadTestPollingResponse>(TestContext.Current.CancellationToken))!;
+    }
+
+    private static async Task<JsonElement> Read(HttpClient client, string path)
+    {
+        var response = await client.GetAsync(path, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        return await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Catalogue_JoinsDiscoveryDetailsAccountAndPrn_WithoutDuplicatingOperator()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        var initial = await Initialise(client, runId);
+        Assert.Equal(500, initial.Allocations.Count);
+        Assert.Equal(125, initial.Allocations.Count(item => !item.IsComplianceScheme));
+        Assert.Equal(375, initial.Allocations.Count(item => item.IsComplianceScheme));
+        Assert.Equal(500, initial.Allocations.Select(item => item.OrganisationId).Distinct().Count());
+        var collection = await Read(client, "/waste-organisations/organisations");
+        Assert.Equal(500, collection.GetProperty("organisations").GetArrayLength());
+        var discovered = collection.GetProperty("organisations").EnumerateArray().Select(item => item.GetProperty("id").GetGuid()).ToHashSet();
+        Assert.All(initial.Allocations, allocation => Assert.Contains(allocation.OrganisationId, discovered));
+
+        foreach (var allocation in new[] { initial.Allocations.First(), initial.Allocations.Last() })
+        {
+            var detail = await Read(client, $"/waste-organisations/organisations/{allocation.OrganisationId}");
+            Assert.Equal(allocation.OrganisationName, detail.GetProperty("name").GetString());
+            Assert.Equal(new[] { 2025, 2026, 2030 }, detail.GetProperty("registrations").EnumerateArray().Select(item => item.GetProperty("registrationYear").GetInt32()));
+            var accountResponse = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-externalIds", new { externalIds = new[] { allocation.OrganisationId } }, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, accountResponse.StatusCode);
+            var account = await accountResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+            Assert.Equal(allocation.OrganisationId, account.GetProperty("organisations")[0].GetProperty("externalId").GetGuid());
+            using var prnRequest = new HttpRequestMessage(HttpMethod.Get, "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2030");
+            prnRequest.Headers.Add("X-EPR-ORGANISATION", allocation.OrganisationId.ToString());
+            var prn = await client.SendAsync(prnRequest, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, prn.StatusCode);
+            var obligations = await prn.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+            Assert.All(obligations.GetProperty("obligationData").EnumerateArray(), material => Assert.Equal(allocation.OrganisationId, material.GetProperty("organisationId").GetGuid()));
+        }
+        var schemes = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-companies-house-numbers", new { companiesHouseNumbers = new[] { "12345678" } }, TestContext.Current.CancellationToken);
+        var schemeRows = await schemes.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal(1, schemeRows.GetArrayLength());
+        Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, schemeRows[0].GetProperty("externalId").GetGuid());
+        Assert.Equal("1", schemeRows[0].GetProperty("referenceNumber").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid}", TestContext.Current.CancellationToken)).StatusCode);
+        foreach (var id in new[] { initial.Allocations.First().OrganisationId, WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid })
+        {
+            var persons = await Read(client, $"/epr-backend-account-microservice/api/organisations/organisation-with-persons/{id}");
+            Assert.Equal("Approved Person", persons.GetProperty("persons")[0].GetProperty("serviceRole").GetString());
+            Assert.False(string.IsNullOrEmpty(persons.GetProperty("persons")[0].GetProperty("email").GetString()));
+        }
+    }
+
+    [Fact]
+    public async Task Growth_UsesElapsedTimeAndCap_RenewalAndRepeatedInitialisationKeepIdsAndStart()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        var initial = await Initialise(client, runId);
+        clock.Advance(299);
+        Assert.Equal(500, (await Read(client, $"/admin/load-test-polling/{runId}")).GetProperty("allocations").GetArrayLength());
+        clock.Advance(1);
+        var at300 = await Read(client, $"/admin/load-test-polling/{runId}");
+        Assert.Equal(501, at300.GetProperty("allocations").GetArrayLength());
+        var grownId = at300.GetProperty("allocations")[500].GetProperty("organisationId").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/waste-organisations/organisations/{grownId}", TestContext.Current.CancellationToken)).StatusCode);
+        using var userRequest = new HttpRequestMessage(HttpMethod.Get,
+            $"/epr-backend-account-microservice/api/users/user-organisations?userId={LoadTestSessionState.DirectProducerUserId}");
+        userRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:125");
+        var userResponse = await client.SendAsync(userRequest, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, userResponse.StatusCode);
+        var user = await userResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        Assert.Equal(grownId, user.GetProperty("user").GetProperty("organisations")[0].GetProperty("id").GetGuid());
+        Assert.Equal("200125", user.GetProperty("user").GetProperty("organisations")[0].GetProperty("organisationNumber").GetString());
+        var renewal = await client.PutAsJsonAsync($"/admin/load-test-runs/{runId}", new { leaseDurationSeconds = 3600 }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, renewal.StatusCode);
+        var repeated = await client.PostAsJsonAsync("/admin/load-test-polling", new LoadTestPollingRequest(runId, 125, 375, [2030, 2026, 2025, 2026], 300, 2), TestContext.Current.CancellationToken);
+        var reused = (await repeated.Content.ReadFromJsonAsync<LoadTestPollingResponse>(TestContext.Current.CancellationToken))!;
+        Assert.Equal(initial.StartedAtUtc, reused.StartedAtUtc);
+        Assert.Equal(initial.Allocations.Select(item => item.OrganisationId), reused.Allocations.Take(500).Select(item => item.OrganisationId));
+        clock.Advance(300);
+        Assert.Equal(502, (await Read(client, $"/admin/load-test-polling/{runId}")).GetProperty("allocations").GetArrayLength());
+        clock.Advance(1200);
+        Assert.Equal(502, (await Read(client, $"/admin/load-test-polling/{runId}")).GetProperty("allocations").GetArrayLength());
+        var session = await client.PostAsJsonAsync("/admin/load-test-sessions", new LoadTestSessionInitialisationRequest(runId, 125, 375), TestContext.Current.CancellationToken);
+        Assert.Equal(500, (await session.Content.ReadFromJsonAsync<LoadTestSessionResponse>(TestContext.Current.CancellationToken))!.UserCount);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync("/admin/load-test-polling", new LoadTestPollingRequest(runId, 125, 375, [2026], 300, 2), TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.DeleteAsync($"/admin/load-test-runs/{Guid.NewGuid()}", TestContext.Current.CancellationToken)).StatusCode);
+        await client.DeleteAsync($"/admin/load-test-runs/{runId}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{grownId}", TestContext.Current.CancellationToken)).StatusCode);
+        var baseline = (await Read(client, "/waste-organisations/organisations")).GetProperty("organisations");
+        Assert.Equal(2, baseline.GetArrayLength());
+        Assert.DoesNotContain(baseline.EnumerateArray(), item => item.GetProperty("id").GetGuid() == grownId);
+    }
+
+    [Fact]
+    public async Task PrnClocks_AreIndependentPerOrganisationAndYear_ExpiryClearsCatalogue()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        var catalogue = await Initialise(client, runId);
+        async Task<JsonElement> Prn(Guid id, int year)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/epr-prn-common-backend/api/v1/prn/obligationcalculation/{year}");
+            request.Headers.Add("X-EPR-ORGANISATION", id.ToString());
+            var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+        }
+        var id = catalogue.Allocations[0].OrganisationId;
+        var before = await Prn(id, 2026);
+        clock.Advance(299);
+        Assert.Equal(before.ToString(), (await Prn(id, 2026)).ToString());
+        await Prn(id, 2030);
+        await Prn(catalogue.Allocations[1].OrganisationId, 2026);
+        clock.Advance(1);
+        var changed = await Prn(id, 2026);
+        Assert.Equal(0, changed.GetProperty("numberOfPrnsAwaitingAcceptance").GetInt32());
+        Assert.All(changed.GetProperty("obligationData").EnumerateArray(), material =>
+        {
+            Assert.Equal("Met", material.GetProperty("status").GetString());
+            Assert.Equal(material.GetProperty("obligationToMeet").GetInt32(), material.GetProperty("tonnageAccepted").GetInt32());
+            Assert.Equal(0, material.GetProperty("tonnageOutstanding").GetInt32());
+        });
+        Assert.Equal(before.ToString(), (await Prn(id, 2030)).ToString());
+        Assert.Equal(1, (await Prn(catalogue.Allocations[1].OrganisationId, 2026)).GetProperty("numberOfPrnsAwaitingAcceptance").GetInt32());
+        clock.Advance(300);
+        Assert.Equal(before.ToString(), (await Prn(id, 2026)).ToString());
+        clock.Advance(300);
+        Assert.Equal(changed.ToString(), (await Prn(id, 2026)).ToString());
+        clock.Advance(2700);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/admin/load-test-polling/{runId}", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{id}", TestContext.Current.CancellationToken)).StatusCode);
+    }
+
+    [Theory]
+    [InlineData("organisations-by-externalIds", "{}")]
+    [InlineData("organisations-by-externalIds", "{\"externalIds\":[]}")]
+    [InlineData("organisations-by-companies-house-numbers", "{}")]
+    [InlineData("organisations-by-companies-house-numbers", "{\"companiesHouseNumbers\":[\"\"]}")]
+    public async Task BulkLookup_InvalidBody_ReturnsBadRequest(string route, string body)
+    {
+        using var factory = Factory(new MutableTimeProvider());
+        using var client = factory.CreateClient();
+        var response = await client.PostAsync($"/epr-backend-account-microservice/api/organisations/{route}", new StringContent(body, System.Text.Encoding.UTF8, "application/json"), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+}

@@ -12,11 +12,28 @@ public static class LoadTestControlEndpoints
         "k6",
         "lighthouse",
         "browser-load",
+        "unsubmitted",
+        "unsubmitted-journey",
     ];
 
     public static void MapLoadTestControlEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/admin");
+        group.MapPost("/load-test-polling", (LoadTestPollingRequest request, LoadTestSessionState state) =>
+        {
+            try
+            {
+                var response = state.InitialisePolling(request);
+                return response is null ? Results.Conflict(new { message = "Matching lease and polling configuration required." })
+                    : Results.Ok(response);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return Results.BadRequest(new { message = "Require 1–1000 initial organisations, years 2023–2050, interval 1–86400 seconds, nonnegative growth and initial plus growth at most 1000." });
+            }
+        });
+        group.MapGet("/load-test-polling/{runId:guid}", (Guid runId, LoadTestSessionState state) =>
+            state.GetPollingStatus(runId) is { } response ? Results.Ok(response) : Results.NotFound());
 
         group.MapPost(
             "/load-test-runs",
@@ -34,7 +51,7 @@ public static class LoadTestControlEndpoints
                 if (!SupportedProfiles.Contains(request.Profile))
                 {
                     return Results.BadRequest(
-                        new { message = "profile must be one of: all, k6, lighthouse, browser-load." }
+                        new { message = "profile must be one of: all, k6, lighthouse, browser-load, unsubmitted, unsubmitted-journey." }
                     );
                 }
 

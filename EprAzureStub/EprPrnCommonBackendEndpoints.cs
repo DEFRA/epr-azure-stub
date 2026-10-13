@@ -23,7 +23,10 @@ public static class EprPrnCommonBackendEndpoints
                 ILoggerFactory loggerFactory
             ) =>
             {
-                if (year is < StartYear or > EndYear)
+                var phase = 0;
+                var simulated = organisationId.HasValue && loadTestSessionState.TryGetPrnPhase(organisationId.Value, year, out phase);
+                if (!simulated && ((year is < StartYear or > EndYear)
+                    || loadTestSessionState.GetPollingAllocations().Any(allocation => allocation.OrganisationId == organisationId)))
                 {
                     return Results.BadRequest($"Invalid year provided: {year}.");
                 }
@@ -52,9 +55,22 @@ public static class EprPrnCommonBackendEndpoints
                             year
                         );
 
-                    return loadTestAllocation.IsComplianceScheme
-                        ? Results.Ok(CreateComplianceSchemeResponse(organisationId.Value))
-                        : Results.Ok(CreateLargeProducerResponse(organisationId.Value));
+                    var response = loadTestAllocation.IsComplianceScheme
+                        ? CreateComplianceSchemeResponse(organisationId.Value)
+                        : CreateLargeProducerResponse(organisationId.Value);
+                    if (simulated && phase % 2 == 1)
+                        response = response with
+                        {
+                            NumberOfPrnsAwaitingAcceptance = 0,
+                            ObligationData = response.ObligationData.Select(material => material with
+                            {
+                                TonnageAwaitingAcceptance = 0,
+                                TonnageAccepted = material.ObligationToMeet ?? 0,
+                                TonnageOutstanding = 0,
+                                Status = "Met"
+                            }).ToArray()
+                        };
+                    return Results.Ok(response);
                 }
 
                 return organisationId.Value switch
