@@ -72,8 +72,12 @@ Its IDs join detail responses, Account bulk lookups, person recipients, session
 lookups and PRN calculations. One extra organisation appears per interval from
 initialisation, with missed intervals caught up on the next request and growth
 capped. The growth period defaults to 1800 seconds. Initial browser session
-allocations stay fixed, including a 750-organisation pool. Compliance schemes
-share the seeded Account operator; that operator is not a Waste Organisations ID.
+allocations stay fixed, including a 750-organisation pool. Each synthetic compliance scheme has its own Account operator ID, distinct from
+its Waste Organisations ID. The scheme and operator share their allocated Companies
+House and reference numbers. Every synthetic organisation has unique numbers,
+including growth and later runs in the same process. Account lookups use the same
+metadata for polling and session-only allocations. The seeded login users and their
+contact details are reused for each type.
 
 Each organisation/year starts its PRN clock on its first PRN request. Its independent
 change period defaults to 1800 seconds. Numeric obligations increase by phase while

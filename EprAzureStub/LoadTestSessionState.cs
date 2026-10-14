@@ -262,41 +262,26 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOpt
         var allocations = new List<LoadTestOrganisationAllocation>();
 
         for (var userIndex = 0; userIndex < directProducerUserCount; userIndex++)
-        {
-            var displayNumber = userIndex + 1;
-
-            allocations.Add(
-                new(
-                    DirectProducerUserId,
-                    userIndex,
-                    Guid.NewGuid(),
-                    null,
-                    $"POP QUEST LTD {displayNumber}",
-                    null
-                )
-            );
-        }
-
+            allocations.Add(CreateAllocation(false, userIndex));
         for (var userIndex = 0; userIndex < complianceSchemeUserCount; userIndex++)
-        {
-            var displayNumber = userIndex + 1;
-
-            allocations.Add(
-                new(
-                    ComplianceSchemeUserId,
-                    userIndex,
-                    Guid.NewGuid(),
-                    // The signed-in CSO session owns this seeded operator organisation.
-                    // Keep it stable so the frontend does not need a load-test-specific
-                    // session override to resolve its organisation number.
-                    WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-                    $"Organisation Name {displayNumber}",
-                    $"Compliance Scheme Name {displayNumber}"
-                )
-            );
-        }
-
+            allocations.Add(CreateAllocation(true, userIndex));
         return allocations;
+    }
+
+    // Keep identifiers distinct across runs while downstream process-local caches survive.
+    private static int _lastMetadataNumber = 20_000_000;
+
+    private static LoadTestOrganisationAllocation CreateAllocation(bool scheme, int userIndex)
+    {
+        var number = Interlocked.Increment(ref _lastMetadataNumber);
+        if (number > 99_999_999)
+            throw new InvalidOperationException("Synthetic Companies House numbers exhausted.");
+        return new(scheme ? ComplianceSchemeUserId : DirectProducerUserId, userIndex,
+            Guid.NewGuid(), scheme ? Guid.NewGuid() : null,
+            scheme ? $"Organisation Name {userIndex + 1}" : $"POP QUEST LTD {userIndex + 1}",
+            scheme ? $"Compliance Scheme Name {userIndex + 1}" : null,
+            number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            number.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private void ExpireRunLeaseIfNeeded(DateTimeOffset now)
@@ -399,7 +384,9 @@ public sealed record LoadTestOrganisationAllocation(
     Guid OrganisationId,
     Guid? OperatorOrganisationId,
     string OrganisationName,
-    string? ComplianceSchemeName
+    string? ComplianceSchemeName,
+    string CompaniesHouseNumber,
+    string ReferenceNumber
 )
 {
     public bool IsComplianceScheme => OperatorOrganisationId.HasValue;

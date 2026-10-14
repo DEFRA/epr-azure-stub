@@ -69,7 +69,7 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
         Assert.Equal("POP QUEST LTD 2", organisation.Name);
         Assert.Null(organisation.TradingName);
         Assert.Equal("GB-ENG", organisation.BusinessCountry);
-        Assert.Equal("17121895", organisation.CompaniesHouseNumber);
+        Assert.Equal(allocation.CompaniesHouseNumber, organisation.CompaniesHouseNumber);
         Assert.Equal("POP QUEST LTD 2", organisation.Address.AddressLine1);
         Assert.Equal("UK", organisation.Address.Country);
         Assert.Equal(6, organisation.Registrations.Count);
@@ -105,7 +105,7 @@ public class WasteOrganisationsEndpointsTests(WebApplicationFactory<Program> fac
         Assert.Equal(allocation.OrganisationId, organisation.Id);
         Assert.Equal("Organisation Name 2", organisation.Name);
         Assert.Equal("Compliance Scheme Name 2", organisation.TradingName);
-        Assert.Equal("12345678", organisation.CompaniesHouseNumber);
+        Assert.Equal(allocation.CompaniesHouseNumber, organisation.CompaniesHouseNumber);
         Assert.All(
             organisation.Registrations,
             registration => Assert.Equal("COMPLIANCE_SCHEME", registration.Type)

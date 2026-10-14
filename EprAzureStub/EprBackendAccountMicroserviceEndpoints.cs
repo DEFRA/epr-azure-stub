@@ -18,10 +18,10 @@ public static class EprBackendAccountMicroserviceEndpoints
                 {
                     return Results.BadRequest();
                 }
-                var allocations = state.GetPollingAllocations();
+                var allocations = state.GetAccountAllocations();
                 var organisations = request.ExternalIds.Distinct().Select(id =>
                 {
-                    var allocation = allocations.FirstOrDefault(item => item.OrganisationId == id || item.OperatorOrganisationId == id);
+                    var allocation = allocations.FirstOrDefault(item => (item.OperatorOrganisationId ?? item.OrganisationId) == id);
                     if (allocation is null && id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid)
                     {
                         return new { externalId = id, name = "POP QUEST LTD", referenceNumber = "165282" };
@@ -46,36 +46,29 @@ public static class EprBackendAccountMicroserviceEndpoints
                 {
                     return Results.BadRequest();
                 }
-                if (state.GetPollingAllocations().Count == 0)
+                var seeded = new[]
                 {
-                    return Results.Ok(new[]
-                    {
-                        new { externalId = WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid, name = "POP QUEST LTD", operatorName = (string?)null,
-                            referenceNumber = "165282", companiesHouseNumber = "17121895", isComplianceScheme = false },
-                        new { externalId = WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, name = "Organisation Name", operatorName = (string?)"Organisation Name",
-                            referenceNumber = "1", companiesHouseNumber = "12345678", isComplianceScheme = true }
-                    }.Where(item => request.CompaniesHouseNumbers.Contains(item.companiesHouseNumber)));
-                }
-                return Results.Ok(
-                state.GetPollingAllocations().GroupBy(state.CompaniesHouseNumber)
-                    .Where(group => request.CompaniesHouseNumbers.Contains(group.Key))
-                    .Select(group =>
-                    {
-                        var allocation = group.First();
-                        return new
-                        {
-                            externalId = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
-                            name = allocation.IsComplianceScheme ? "Organisation Name" : allocation.OrganisationName,
-                            operatorName = allocation.IsComplianceScheme ? "Organisation Name" : null,
-                            referenceNumber = state.ReferenceNumber(allocation),
-                            companiesHouseNumber = group.Key,
-                            isComplianceScheme = allocation.IsComplianceScheme
-                        };
-                    }));
+                    new { externalId = WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid, name = "POP QUEST LTD", operatorName = (string?)null,
+                        referenceNumber = "165282", companiesHouseNumber = "17121895", isComplianceScheme = false },
+                    new { externalId = WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, name = "Organisation Name", operatorName = (string?)"Organisation Name",
+                        referenceNumber = "1", companiesHouseNumber = "12345678", isComplianceScheme = true }
+                };
+                var generated = state.GetAccountAllocations().Select(allocation => new
+                {
+                    externalId = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
+                    name = allocation.OrganisationName,
+                    operatorName = allocation.IsComplianceScheme ? allocation.OrganisationName : null,
+                    referenceNumber = allocation.ReferenceNumber,
+                    companiesHouseNumber = allocation.CompaniesHouseNumber,
+                    isComplianceScheme = allocation.IsComplianceScheme
+                });
+                return Results.Ok(seeded.Concat(generated)
+                    .Where(item => request.CompaniesHouseNumbers.Contains(item.companiesHouseNumber)));
+
             });
         group.MapGet("/api/organisations/organisation-with-persons/{id:guid}", (Guid id, LoadTestSessionState state) =>
         {
-            var allocation = state.GetPollingAllocations().FirstOrDefault(item => item.OrganisationId == id || item.OperatorOrganisationId == id);
+            var allocation = state.GetAccountAllocations().FirstOrDefault(item => item.OrganisationId == id || item.OperatorOrganisationId == id);
             var userId = allocation?.UserId ?? (id == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid
                 ? LoadTestSessionState.ComplianceSchemeUserId : id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
                     ? LoadTestSessionState.DirectProducerUserId : Guid.Empty);
@@ -281,6 +274,11 @@ public static class EprBackendAccountMicroserviceEndpoints
 
                     return Results.Ok(CreateLoadTestComplianceSchemeResponse(loadTestAllocation));
                 }
+
+                var allocation = loadTestSessionState.GetAccountAllocations()
+                    .SingleOrDefault(item => item.OperatorOrganisationId == organisationId);
+                if (allocation is not null)
+                    return Results.Ok(CreateLoadTestComplianceSchemeResponse(allocation));
 
                 if (organisationId == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)
                 {
@@ -551,6 +549,7 @@ public static class EprBackendAccountMicroserviceEndpoints
             {
                 Id = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
                 Name = allocation.OrganisationName,
+                TradingName = allocation.ComplianceSchemeName ?? allocation.OrganisationName,
                 OrganisationNumber = state.ReferenceNumber(allocation),
                 CompaniesHouseNumber = state.CompaniesHouseNumber(allocation),
             }

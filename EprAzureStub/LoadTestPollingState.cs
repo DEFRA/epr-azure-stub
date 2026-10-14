@@ -108,11 +108,18 @@ public sealed partial class LoadTestSessionState
         }
     }
 
-    public string ReferenceNumber(LoadTestOrganisationAllocation allocation) => allocation.IsComplianceScheme
-        ? "1" : _polling is null ? "165282" : (200000 + allocation.UserIndex).ToString();
+    public string ReferenceNumber(LoadTestOrganisationAllocation allocation) => allocation.ReferenceNumber;
+    public string CompaniesHouseNumber(LoadTestOrganisationAllocation allocation) => allocation.CompaniesHouseNumber;
 
-    public string CompaniesHouseNumber(LoadTestOrganisationAllocation allocation) => allocation.IsComplianceScheme
-        ? "12345678" : _polling is null ? "17121895" : (20000000 + allocation.UserIndex).ToString();
+    public IReadOnlyList<LoadTestOrganisationAllocation> GetAccountAllocations()
+    {
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
+            GrowCatalogue();
+            return (_polling?.Allocations ?? _session?.Allocations)?.ToArray() ?? [];
+        }
+    }
 
     private void GrowCatalogue()
     {
@@ -130,10 +137,7 @@ public sealed partial class LoadTestSessionState
             var scheme = request.DirectProducerUserCount == 0
                 || (request.ComplianceSchemeUserCount > 0 && additionalIndex % 2 == 1);
             var index = scheme ? _polling.NextComplianceSchemeIndex++ : _polling.NextDirectProducerIndex++;
-            _polling.Allocations.Add(new(scheme ? ComplianceSchemeUserId : DirectProducerUserId, index,
-                Guid.NewGuid(), scheme ? WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid : null,
-                scheme ? $"Organisation Name {index + 1}" : $"POP QUEST LTD {index + 1}",
-                scheme ? $"Compliance Scheme Name {index + 1}" : null));
+            _polling.Allocations.Add(CreateAllocation(scheme, index));
         }
     }
 

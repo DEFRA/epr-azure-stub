@@ -40,7 +40,7 @@ public class LoadTestPollingEndpointsTests
     }
 
     [Fact]
-    public async Task Catalogue_JoinsDiscoveryDetailsAccountAndPrn_WithoutDuplicatingOperator()
+    public async Task Catalogue_JoinsDiscoveryDetailsAccountAndPrn_WithUniqueOperatorMetadata()
     {
         var clock = new MutableTimeProvider();
         using var factory = Factory(clock);
@@ -60,11 +60,14 @@ public class LoadTestPollingEndpointsTests
         {
             var detail = await Read(client, $"/waste-organisations/organisations/{allocation.OrganisationId}");
             Assert.Equal(allocation.OrganisationName, detail.GetProperty("name").GetString());
+            var recipients = await Read(client, $"/epr-backend-account-microservice/api/organisations/person-emails?organisationId={allocation.OrganisationId}&entityTypeCode={(allocation.IsComplianceScheme ? "CS" : "DR")}");
+            Assert.Contains(recipients.EnumerateArray(), recipient => recipient.GetProperty("email").GetString()
+                == (allocation.IsComplianceScheme ? "test+17122025143216@ee.com" : "test+directproducer@ee.com"));
             Assert.Equal(new[] { 2025, 2026, 2030 }, detail.GetProperty("registrations").EnumerateArray().Select(item => item.GetProperty("registrationYear").GetInt32()));
-            var accountResponse = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-externalIds", new { externalIds = new[] { allocation.OrganisationId } }, TestContext.Current.CancellationToken);
+            var accountResponse = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-externalIds", new { externalIds = new[] { allocation.OperatorOrganisationId ?? allocation.OrganisationId } }, TestContext.Current.CancellationToken);
             Assert.Equal(HttpStatusCode.OK, accountResponse.StatusCode);
             var account = await accountResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
-            Assert.Equal(allocation.OrganisationId, account.GetProperty("organisations")[0].GetProperty("externalId").GetGuid());
+            Assert.Equal(allocation.OperatorOrganisationId ?? allocation.OrganisationId, account.GetProperty("organisations")[0].GetProperty("externalId").GetGuid());
             using var prnRequest = new HttpRequestMessage(HttpMethod.Get, "/epr-prn-common-backend/api/v1/prn/obligationcalculation/2030");
             prnRequest.Headers.Add("X-EPR-ORGANISATION", allocation.OrganisationId.ToString());
             var prn = await client.SendAsync(prnRequest, TestContext.Current.CancellationToken);
@@ -72,18 +75,114 @@ public class LoadTestPollingEndpointsTests
             var obligations = await prn.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
             Assert.All(obligations.GetProperty("obligationData").EnumerateArray(), material => Assert.Equal(allocation.OrganisationId, material.GetProperty("organisationId").GetGuid()));
         }
-        var schemes = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-companies-house-numbers", new { companiesHouseNumbers = new[] { "12345678" } }, TestContext.Current.CancellationToken);
+        Assert.Equal(500, initial.Allocations.Select(item => item.CompaniesHouseNumber).Distinct().Count());
+        Assert.Equal(500, initial.Allocations.Select(item => item.ReferenceNumber).Distinct().Count());
+        Assert.Equal(375, initial.Allocations.Where(item => item.IsComplianceScheme).Select(item => item.OperatorOrganisationId).Distinct().Count());
+        Assert.All(initial.Allocations, item => Assert.Matches("^[0-9]{8}$", item.CompaniesHouseNumber));
+        var schemes = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-companies-house-numbers",
+            new { companiesHouseNumbers = initial.Allocations.Select(item => item.CompaniesHouseNumber).ToArray() }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, schemes.StatusCode);
         var schemeRows = await schemes.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
-        Assert.Equal(1, schemeRows.GetArrayLength());
-        Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, schemeRows[0].GetProperty("externalId").GetGuid());
-        Assert.Equal("1", schemeRows[0].GetProperty("referenceNumber").GetString());
+        Assert.Equal(500, schemeRows.GetArrayLength());
+        foreach (var allocation in initial.Allocations)
+        {
+            var row = Assert.Single(schemeRows.EnumerateArray(), item => item.GetProperty("companiesHouseNumber").GetString() == allocation.CompaniesHouseNumber);
+            Assert.Equal(allocation.OperatorOrganisationId ?? allocation.OrganisationId, row.GetProperty("externalId").GetGuid());
+            Assert.Equal(allocation.ReferenceNumber, row.GetProperty("referenceNumber").GetString());
+            Assert.Equal(allocation.OrganisationName, row.GetProperty("name").GetString());
+            Assert.Equal(allocation.IsComplianceScheme, row.GetProperty("isComplianceScheme").GetBoolean());
+            if (allocation.IsComplianceScheme)
+            {
+                var linked = await Read(client, $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={allocation.OperatorOrganisationId}");
+                Assert.Equal(allocation.OrganisationId, Assert.Single(linked.EnumerateArray()).GetProperty("id").GetGuid());
+            }
+        }
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid}", TestContext.Current.CancellationToken)).StatusCode);
-        foreach (var id in new[] { initial.Allocations.First().OrganisationId, WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid })
+        foreach (var id in new[] { initial.Allocations.First().OrganisationId, initial.Allocations.Last().OperatorOrganisationId!.Value })
         {
             var persons = await Read(client, $"/epr-backend-account-microservice/api/organisations/organisation-with-persons/{id}");
             Assert.Equal("Approved Person", persons.GetProperty("persons")[0].GetProperty("serviceRole").GetString());
             Assert.False(string.IsNullOrEmpty(persons.GetProperty("persons")[0].GetProperty("email").GetString()));
         }
+    }
+
+    [Fact]
+    public async Task SessionOnlyAccountLookups_UseSharedMetadata_AndNewRunsDoNotReuseNumbers()
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        async Task<LoadTestOrganisationAllocation[]> Allocate(Guid runId)
+        {
+            Assert.Equal(HttpStatusCode.Created, (await client.PostAsJsonAsync("/admin/load-test-runs",
+                new LoadTestRunLeaseRequest(runId, "unsubmitted-journey", 3600), TestContext.Current.CancellationToken)).StatusCode);
+            var response = await client.PostAsJsonAsync("/admin/load-test-sessions",
+                new LoadTestSessionInitialisationRequest(runId, 1, 2), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<LoadTestSessionResponse>(TestContext.Current.CancellationToken))!
+                .Users.SelectMany(user => user.Allocations).ToArray();
+        }
+        var firstRun = Guid.NewGuid();
+        var first = await Allocate(firstRun);
+        var seededResponse = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-companies-house-numbers",
+            new { companiesHouseNumbers = new[] { "17121895", "12345678" } }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, seededResponse.StatusCode);
+        var seededRows = (await seededResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).EnumerateArray().ToArray();
+        Assert.Equal(2, seededRows.Length);
+        var seededProducer = Assert.Single(seededRows, row => row.GetProperty("companiesHouseNumber").GetString() == "17121895");
+        Assert.Equal(WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid, seededProducer.GetProperty("externalId").GetGuid());
+        Assert.Equal("165282", seededProducer.GetProperty("referenceNumber").GetString());
+        var seededScheme = Assert.Single(seededRows, row => row.GetProperty("companiesHouseNumber").GetString() == "12345678");
+        Assert.Equal(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, seededScheme.GetProperty("externalId").GetGuid());
+        Assert.Equal("1", seededScheme.GetProperty("referenceNumber").GetString());
+        var repeated = await client.PostAsJsonAsync("/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(firstRun, 1, 2), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, repeated.StatusCode);
+        Assert.Equal(first, (await repeated.Content.ReadFromJsonAsync<LoadTestSessionResponse>(TestContext.Current.CancellationToken))!
+            .Users.SelectMany(user => user.Allocations));
+        foreach (var allocation in first)
+        {
+            var recipients = await Read(client, $"/epr-backend-account-microservice/api/organisations/person-emails?organisationId={allocation.OrganisationId}&entityTypeCode={(allocation.IsComplianceScheme ? "CS" : "DR")}");
+            Assert.Contains(recipients.EnumerateArray(), recipient => recipient.GetProperty("email").GetString()
+                == (allocation.IsComplianceScheme ? "test+17122025143216@ee.com" : "test+directproducer@ee.com"));
+            if (allocation.IsComplianceScheme)
+                Assert.Equal(HttpStatusCode.NoContent, (await client.GetAsync(
+                    $"/epr-backend-account-microservice/api/organisations/person-emails?organisationId={allocation.OperatorOrganisationId}&entityTypeCode=CS",
+                    TestContext.Current.CancellationToken)).StatusCode);
+            var bulk = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-companies-house-numbers",
+                new { companiesHouseNumbers = new[] { allocation.CompaniesHouseNumber } }, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, bulk.StatusCode);
+            var row = Assert.Single((await bulk.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken)).EnumerateArray());
+            Assert.Equal(allocation.OperatorOrganisationId ?? allocation.OrganisationId, row.GetProperty("externalId").GetGuid());
+            Assert.Equal(allocation.ReferenceNumber, row.GetProperty("referenceNumber").GetString());
+            var external = await client.PostAsJsonAsync("/epr-backend-account-microservice/api/organisations/organisations-by-externalIds",
+                new { externalIds = new[] { allocation.OperatorOrganisationId ?? allocation.OrganisationId } }, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, external.StatusCode);
+            var externalRow = Assert.Single((await external.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken))
+                .GetProperty("organisations").EnumerateArray());
+            Assert.Equal(allocation.ReferenceNumber, externalRow.GetProperty("referenceNumber").GetString());
+            if (allocation.IsComplianceScheme)
+            {
+                var scheme = await Read(client, $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={allocation.OperatorOrganisationId}");
+                Assert.Equal(allocation.OrganisationId, Assert.Single(scheme.EnumerateArray()).GetProperty("id").GetGuid());
+                using var mismatched = new HttpRequestMessage(HttpMethod.Get,
+                    $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={allocation.OperatorOrganisationId}");
+                mismatched.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{firstRun}:{(allocation.UserIndex == 0 ? 1 : 0)}");
+                Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(mismatched, TestContext.Current.CancellationToken)).StatusCode);
+            }
+        }
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/load-test-runs/{firstRun}", TestContext.Current.CancellationToken)).StatusCode);
+        var second = await Allocate(Guid.NewGuid());
+        using var expired = new HttpRequestMessage(HttpMethod.Get,
+            $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={first.First(item => item.IsComplianceScheme).OperatorOrganisationId}");
+        expired.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{firstRun}:0");
+        Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(expired, TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Empty(first.Select(item => item.CompaniesHouseNumber).Intersect(second.Select(item => item.CompaniesHouseNumber)));
+        Assert.Empty(first.Select(item => item.ReferenceNumber).Intersect(second.Select(item => item.ReferenceNumber)));
+        var oldScheme = first.First(item => item.IsComplianceScheme);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(
+            $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={oldScheme.OperatorOrganisationId}",
+            TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Theory]
@@ -127,6 +226,8 @@ public class LoadTestPollingEndpointsTests
             var organisation = Assert.Single(body.GetProperty("user").GetProperty("organisations").EnumerateArray());
             Assert.Equal(allocation.OperatorOrganisationId ?? allocation.OrganisationId, organisation.GetProperty("id").GetGuid());
             Assert.Equal(allocation.OrganisationName, organisation.GetProperty("name").GetString());
+            Assert.Equal(allocation.CompaniesHouseNumber, organisation.GetProperty("companiesHouseNumber").GetString());
+            Assert.Equal(allocation.ReferenceNumber, organisation.GetProperty("organisationNumber").GetString());
 
             if (allocation.IsComplianceScheme)
             {
@@ -139,6 +240,10 @@ public class LoadTestPollingEndpointsTests
                 var scheme = Assert.Single(schemes.EnumerateArray());
                 Assert.Equal(allocation.OrganisationId, scheme.GetProperty("id").GetGuid());
                 Assert.Equal(allocation.ComplianceSchemeName, scheme.GetProperty("name").GetString());
+                using var mismatched = new HttpRequestMessage(HttpMethod.Get,
+                    $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={allocation.OperatorOrganisationId}");
+                mismatched.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:{(allocation.UserIndex == 0 ? 1 : 0)}");
+                Assert.Equal(HttpStatusCode.Conflict, (await client.SendAsync(mismatched, TestContext.Current.CancellationToken)).StatusCode);
             }
 
             var detail = await Read(client, $"/waste-organisations/organisations/{allocation.OrganisationId}");
@@ -171,6 +276,8 @@ public class LoadTestPollingEndpointsTests
         clock.Advance(600);
         var grown = await Polling();
         Assert.Equal(6, grown.Allocations.Count);
+        Assert.Equal(6, grown.Allocations.Select(item => item.CompaniesHouseNumber).Distinct().Count());
+        Assert.Equal(6, grown.Allocations.Select(item => item.ReferenceNumber).Distinct().Count());
         Assert.Equal(original, grown.Allocations.Take(4));
         var repeatedSession = await Sessions();
         Assert.Equal(4, repeatedSession.UserCount);
@@ -206,7 +313,7 @@ public class LoadTestPollingEndpointsTests
         Assert.Equal(HttpStatusCode.OK, userResponse.StatusCode);
         var user = await userResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
         Assert.Equal(grownId, user.GetProperty("user").GetProperty("organisations")[0].GetProperty("id").GetGuid());
-        Assert.Equal("200125", user.GetProperty("user").GetProperty("organisations")[0].GetProperty("organisationNumber").GetString());
+        Assert.Equal(at300.GetProperty("allocations")[500].GetProperty("referenceNumber").GetString(), user.GetProperty("user").GetProperty("organisations")[0].GetProperty("organisationNumber").GetString());
         var renewal = await client.PutAsJsonAsync($"/admin/load-test-runs/{runId}", new { leaseDurationSeconds = 3600 }, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, renewal.StatusCode);
         var repeated = await client.PostAsJsonAsync("/admin/load-test-polling", new LoadTestPollingRequest(runId, 125, 375, [2030, 2026, 2025, 2026], 300, 2), TestContext.Current.CancellationToken);
