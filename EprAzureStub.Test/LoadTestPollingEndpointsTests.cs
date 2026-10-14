@@ -86,6 +86,104 @@ public class LoadTestPollingEndpointsTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SessionsAndPolling_ShareAllocationsInEitherInitialisationOrder_AfterGrowth(bool sessionsFirst)
+    {
+        var clock = new MutableTimeProvider();
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var runId = Guid.NewGuid();
+        var lease = await client.PostAsJsonAsync("/admin/load-test-runs",
+            new LoadTestRunLeaseRequest(runId, "unsubmitted-journey", 3600), TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, lease.StatusCode);
+
+        async Task<LoadTestSessionResponse> Sessions()
+        {
+            var response = await client.PostAsJsonAsync("/admin/load-test-sessions",
+                new LoadTestSessionInitialisationRequest(runId, 2, 2), TestContext.Current.CancellationToken);
+            Assert.True(response.StatusCode is HttpStatusCode.Created or HttpStatusCode.OK);
+            return (await response.Content.ReadFromJsonAsync<LoadTestSessionResponse>(TestContext.Current.CancellationToken))!;
+        }
+
+        async Task<LoadTestPollingResponse> Polling()
+        {
+            var response = await client.PostAsJsonAsync("/admin/load-test-polling",
+                new LoadTestPollingRequest(runId, 2, 2, [2026], 300, 2), TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return (await response.Content.ReadFromJsonAsync<LoadTestPollingResponse>(TestContext.Current.CancellationToken))!;
+        }
+
+        async Task AssertAccountAllocation(LoadTestOrganisationAllocation allocation)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"/epr-backend-account-microservice/api/users/user-organisations?userId={allocation.UserId}");
+            request.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:{allocation.UserIndex}");
+            var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+            Assert.Equal(allocation.UserId, body.GetProperty("user").GetProperty("id").GetGuid());
+            var organisation = Assert.Single(body.GetProperty("user").GetProperty("organisations").EnumerateArray());
+            Assert.Equal(allocation.OperatorOrganisationId ?? allocation.OrganisationId, organisation.GetProperty("id").GetGuid());
+            Assert.Equal(allocation.OrganisationName, organisation.GetProperty("name").GetString());
+
+            if (allocation.IsComplianceScheme)
+            {
+                using var schemeRequest = new HttpRequestMessage(HttpMethod.Get,
+                    $"/epr-backend-account-microservice/api/compliance-schemes/get-for-operator?organisationId={allocation.OperatorOrganisationId}");
+                schemeRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:{allocation.UserIndex}");
+                var schemeResponse = await client.SendAsync(schemeRequest, TestContext.Current.CancellationToken);
+                Assert.Equal(HttpStatusCode.OK, schemeResponse.StatusCode);
+                var schemes = await schemeResponse.Content.ReadFromJsonAsync<JsonElement>(TestContext.Current.CancellationToken);
+                var scheme = Assert.Single(schemes.EnumerateArray());
+                Assert.Equal(allocation.OrganisationId, scheme.GetProperty("id").GetGuid());
+                Assert.Equal(allocation.ComplianceSchemeName, scheme.GetProperty("name").GetString());
+            }
+
+            var detail = await Read(client, $"/waste-organisations/organisations/{allocation.OrganisationId}");
+            var registration = Assert.Single(detail.GetProperty("registrations").EnumerateArray());
+            Assert.Equal(allocation.IsComplianceScheme ? "COMPLIANCE_SCHEME" : "LARGE_PRODUCER",
+                registration.GetProperty("type").GetString());
+        }
+
+        LoadTestSessionResponse session;
+        LoadTestPollingResponse polling;
+        if (sessionsFirst)
+        {
+            session = await Sessions();
+            polling = await Polling();
+        }
+        else
+        {
+            polling = await Polling();
+            session = await Sessions();
+        }
+
+        var original = session.Users.SelectMany(user => user.Allocations).ToArray();
+        Assert.Equal(4, original.Length);
+        Assert.Equal(2, original.Count(allocation => !allocation.IsComplianceScheme));
+        Assert.Equal(2, original.Count(allocation => allocation.IsComplianceScheme));
+        Assert.Equal(original, polling.Allocations);
+        foreach (var allocation in original)
+            await AssertAccountAllocation(allocation);
+
+        clock.Advance(600);
+        var grown = await Polling();
+        Assert.Equal(6, grown.Allocations.Count);
+        Assert.Equal(original, grown.Allocations.Take(4));
+        var repeatedSession = await Sessions();
+        Assert.Equal(4, repeatedSession.UserCount);
+        Assert.Equal(original, repeatedSession.Users.SelectMany(user => user.Allocations));
+        var catalogue = await Read(client, "/waste-organisations/organisations");
+        var ids = catalogue.GetProperty("organisations").EnumerateArray().Select(item => item.GetProperty("id").GetGuid()).ToHashSet();
+        foreach (var allocation in grown.Allocations)
+        {
+            Assert.Contains(allocation.OrganisationId, ids);
+            await AssertAccountAllocation(allocation);
+        }
+    }
+
     [Fact]
     public async Task Growth_UsesElapsedTimeAndCap_RenewalAndRepeatedInitialisationKeepIdsAndStart()
     {
