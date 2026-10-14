@@ -23,7 +23,10 @@ public static class EprPrnCommonBackendEndpoints
                 ILoggerFactory loggerFactory
             ) =>
             {
-                if (year is < StartYear or > EndYear)
+                var phase = 0;
+                var simulated = organisationId.HasValue && loadTestSessionState.TryGetPrnPhase(organisationId.Value, year, out phase);
+                if (!simulated && ((year is < StartYear or > EndYear)
+                    || loadTestSessionState.GetPollingAllocations().Any(allocation => allocation.OrganisationId == organisationId)))
                 {
                     return Results.BadRequest($"Invalid year provided: {year}.");
                 }
@@ -52,9 +55,29 @@ public static class EprPrnCommonBackendEndpoints
                             year
                         );
 
-                    return loadTestAllocation.IsComplianceScheme
-                        ? Results.Ok(CreateComplianceSchemeResponse(organisationId.Value))
-                        : Results.Ok(CreateLargeProducerResponse(organisationId.Value));
+                    var response = loadTestAllocation.IsComplianceScheme
+                        ? CreateComplianceSchemeResponse(organisationId.Value)
+                        : CreateLargeProducerResponse(organisationId.Value);
+                    if (simulated && phase > 0)
+                        response = response with
+                        {
+                            NumberOfPrnsAwaitingAcceptance = phase % 2 == 1 ? 0 : 1,
+                            ObligationData = response.ObligationData.Select(material =>
+                            {
+                                var obligation = (material.ObligationToMeet ?? 0) + phase * 5;
+                                var outstanding = phase % 2 == 1 ? 0 : 10 + phase;
+                                return material with
+                                {
+                                    Tonnage = material.Tonnage + phase * 10,
+                                    ObligationToMeet = obligation,
+                                    TonnageAwaitingAcceptance = outstanding,
+                                    TonnageAccepted = obligation - outstanding,
+                                    TonnageOutstanding = outstanding,
+                                    Status = outstanding == 0 ? "Met" : "NotMet"
+                                };
+                            }).ToArray()
+                        };
+                    return Results.Ok(response);
                 }
 
                 return organisationId.Value switch

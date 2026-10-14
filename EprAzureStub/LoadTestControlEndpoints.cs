@@ -12,11 +12,28 @@ public static class LoadTestControlEndpoints
         "k6",
         "lighthouse",
         "browser-load",
+        "unsubmitted",
+        "unsubmitted-journey",
     ];
 
     public static void MapLoadTestControlEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/admin");
+        group.MapPost("/load-test-polling", (LoadTestPollingRequest request, LoadTestSessionState state) =>
+        {
+            try
+            {
+                var response = state.InitialisePolling(request);
+                return response is null ? Results.Conflict(new { message = "Matching lease and polling configuration required." })
+                    : Results.Ok(response);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return Results.BadRequest(new { message = $"Require positive initial organisations, years 2023–2050, intervals 1–86400 seconds, nonnegative growth and initial plus growth at most {state.MaximumOrganisationCount}." });
+            }
+        });
+        group.MapGet("/load-test-polling/{runId:guid}", (Guid runId, LoadTestSessionState state) =>
+            state.GetPollingStatus(runId) is { } response ? Results.Ok(response) : Results.NotFound());
 
         group.MapPost(
             "/load-test-runs",
@@ -34,7 +51,7 @@ public static class LoadTestControlEndpoints
                 if (!SupportedProfiles.Contains(request.Profile))
                 {
                     return Results.BadRequest(
-                        new { message = "profile must be one of: all, k6, lighthouse, browser-load." }
+                        new { message = "profile must be one of: all, k6, lighthouse, browser-load, unsubmitted, unsubmitted-journey." }
                     );
                 }
 
@@ -170,7 +187,7 @@ public static class LoadTestControlEndpoints
                 catch (ArgumentOutOfRangeException)
                 {
                     return Results.BadRequest(
-                        new { message = "The total user count must be between 1 and 1000." }
+                        new { message = $"The total user count must be between 1 and {loadTestSessionState.MaximumOrganisationCount}." }
                     );
                 }
             }

@@ -4,11 +4,88 @@ namespace EprAzureStub;
 
 public static class EprBackendAccountMicroserviceEndpoints
 {
+    public sealed record ExternalIdsRequest(Guid[] ExternalIds);
+    public sealed record CompaniesHouseNumbersRequest(string[] CompaniesHouseNumbers);
     public static void MapEprBackendAccountMicroserviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/epr-backend-account-microservice");
 
         group.MapGet("/admin/health", () => Results.Ok());
+        group.MapPost("/api/organisations/organisations-by-externalIds",
+            (ExternalIdsRequest request, LoadTestSessionState state) =>
+            {
+                if (request.ExternalIds is null || request.ExternalIds.Length == 0)
+                {
+                    return Results.BadRequest();
+                }
+                var allocations = state.GetAccountAllocations();
+                var organisations = request.ExternalIds.Distinct().Select(id =>
+                {
+                    var allocation = allocations.FirstOrDefault(item => (item.OperatorOrganisationId ?? item.OrganisationId) == id);
+                    if (allocation is null && id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid)
+                    {
+                        return new { externalId = id, name = "POP QUEST LTD", referenceNumber = "165282" };
+                    }
+                    if (allocation is null && (id == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid || id == WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid))
+                    {
+                        return new { externalId = id, name = "Organisation Name", referenceNumber = "1" };
+                    }
+                    return allocation is null ? null : new
+                    {
+                        externalId = id,
+                        name = allocation.OrganisationName,
+                        referenceNumber = state.ReferenceNumber(allocation)
+                    };
+                }).Where(item => item is not null).ToArray();
+                return Results.Ok(new { organisations, notFoundExternalIds = request.ExternalIds.Except(organisations.Select(item => item!.externalId)) });
+            });
+        group.MapPost("/api/organisations/organisations-by-companies-house-numbers",
+            (CompaniesHouseNumbersRequest request, LoadTestSessionState state) =>
+            {
+                if (request.CompaniesHouseNumbers is null || !request.CompaniesHouseNumbers.Any(value => !string.IsNullOrWhiteSpace(value)))
+                {
+                    return Results.BadRequest();
+                }
+                var seeded = new[]
+                {
+                    new { externalId = WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid, name = "POP QUEST LTD", operatorName = (string?)null,
+                        referenceNumber = "165282", companiesHouseNumber = "17121895", isComplianceScheme = false },
+                    new { externalId = WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, name = "Organisation Name", operatorName = (string?)"Organisation Name",
+                        referenceNumber = "1", companiesHouseNumber = "12345678", isComplianceScheme = true }
+                };
+                var generated = state.GetAccountAllocations().Select(allocation => new
+                {
+                    externalId = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
+                    name = allocation.OrganisationName,
+                    operatorName = allocation.IsComplianceScheme ? allocation.OrganisationName : null,
+                    referenceNumber = allocation.ReferenceNumber,
+                    companiesHouseNumber = allocation.CompaniesHouseNumber,
+                    isComplianceScheme = allocation.IsComplianceScheme
+                });
+                return Results.Ok(seeded.Concat(generated)
+                    .Where(item => request.CompaniesHouseNumbers.Contains(item.companiesHouseNumber)));
+
+            });
+        group.MapGet("/api/organisations/organisation-with-persons/{id:guid}", (Guid id, LoadTestSessionState state) =>
+        {
+            var allocation = state.GetAccountAllocations().FirstOrDefault(item => item.OrganisationId == id || item.OperatorOrganisationId == id);
+            var userId = allocation?.UserId ?? (id == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid
+                ? LoadTestSessionState.ComplianceSchemeUserId : id == WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid
+                    ? LoadTestSessionState.DirectProducerUserId : Guid.Empty);
+            if (userId == Guid.Empty)
+            {
+                return Results.NotFound();
+            }
+            var user = FindSeededUser(userId)!;
+            return Results.Ok(new
+            {
+                persons = new[] { new
+            {
+                userId = user.UserId, firstName = user.FirstName, lastName = user.LastName,
+                email = user.Email, serviceRole = "Approved Person"
+            } }
+            });
+        });
 
         group.MapGet(
             "/api/organisations/person-emails",
@@ -143,7 +220,7 @@ public static class EprBackendAccountMicroserviceEndpoints
                         );
 
                     return Results.Ok(
-                        CreateUserOrganisationsResponse(loadTestUser, loadTestAllocation)
+                        CreateUserOrganisationsResponse(loadTestUser, loadTestAllocation, loadTestSessionState)
                     );
                 }
 
@@ -197,6 +274,11 @@ public static class EprBackendAccountMicroserviceEndpoints
 
                     return Results.Ok(CreateLoadTestComplianceSchemeResponse(loadTestAllocation));
                 }
+
+                var allocation = loadTestSessionState.GetAccountAllocations()
+                    .SingleOrDefault(item => item.OperatorOrganisationId == organisationId);
+                if (allocation is not null)
+                    return Results.Ok(CreateLoadTestComplianceSchemeResponse(allocation));
 
                 if (organisationId == WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)
                 {
@@ -458,7 +540,8 @@ public static class EprBackendAccountMicroserviceEndpoints
 
     private static UserOrganisationsListModel CreateUserOrganisationsResponse(
         SeededUser seededUser,
-        LoadTestOrganisationAllocation allocation
+        LoadTestOrganisationAllocation allocation,
+        LoadTestSessionState state
     )
     {
         var organisation = CreateOrganisationDetail(
@@ -466,6 +549,9 @@ public static class EprBackendAccountMicroserviceEndpoints
             {
                 Id = allocation.OperatorOrganisationId ?? allocation.OrganisationId,
                 Name = allocation.OrganisationName,
+                TradingName = allocation.ComplianceSchemeName ?? allocation.OrganisationName,
+                OrganisationNumber = state.ReferenceNumber(allocation),
+                CompaniesHouseNumber = state.CompaniesHouseNumber(allocation),
             }
         );
 

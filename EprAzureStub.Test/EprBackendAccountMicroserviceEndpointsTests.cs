@@ -425,13 +425,13 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
             body.Users,
             user => user.UserId == ComplianceSchemeUserId
         );
-        Assert.All(
-            complianceScheme.Allocations,
-            allocation => Assert.Equal(
-                WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-                allocation.OperatorOrganisationId
-            )
-        );
+        Assert.All(complianceScheme.Allocations, allocation =>
+        {
+            Assert.NotNull(allocation.OperatorOrganisationId);
+            Assert.NotEqual(allocation.OrganisationId, allocation.OperatorOrganisationId);
+            Assert.NotEqual(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, allocation.OperatorOrganisationId);
+        });
+        Assert.Equal(3, complianceScheme.Allocations.Select(allocation => allocation.OperatorOrganisationId).Distinct().Count());
         Assert.Equal(3, complianceScheme.Allocations.Count);
         Assert.Equal(3, complianceScheme.Allocations.Select(allocation => allocation.OrganisationId).Distinct().Count());
         var directProducer = Assert.Single(
@@ -613,10 +613,7 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
             2,
             1
         );
-        Assert.Equal(
-            WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-            allocation.OperatorOrganisationId
-        );
+        Assert.NotEqual(WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid, allocation.OperatorOrganisationId);
 
         using var userRequest = new HttpRequestMessage(
             HttpMethod.Get,
@@ -635,15 +632,15 @@ public class EprBackendAccountMicroserviceEndpointsTests(WebApplicationFactory<P
         );
         Assert.NotNull(userBody);
         var organisation = Assert.Single(userBody.User.Organisations);
-        Assert.Equal(
-            WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-            organisation.Id
-        );
+        Assert.Equal(allocation.OperatorOrganisationId, organisation.Id);
+        Assert.Equal(allocation.CompaniesHouseNumber, organisation.CompaniesHouseNumber);
+        Assert.Equal(allocation.ReferenceNumber, organisation.OrganisationNumber);
+        Assert.Equal(allocation.ComplianceSchemeName, organisation.TradingName);
         Assert.Equal("Organisation Name 2", organisation.Name);
 
         using var schemeRequest = new HttpRequestMessage(
             HttpMethod.Get,
-            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid}"
+            $"{ComplianceSchemesForOperatorEndpoint}?organisationId={allocation.OperatorOrganisationId}"
         );
         schemeRequest.Headers.Add(LoadTestSessionState.SessionHeaderName, $"{runId}:1");
 

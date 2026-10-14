@@ -67,6 +67,20 @@ public static class WasteOrganisationsEndpoints
         var group = app.MapGroup("/waste-organisations");
 
         group.MapGet("/health/authorized", () => Results.Ok());
+        group.MapGet("/organisations", (LoadTestSessionState state) =>
+        {
+            var allocations = state.GetPollingAllocations();
+            return Results.Ok(new
+            {
+                organisations = allocations.Count > 0
+                    ? allocations.Select(allocation => CreateOrganisationResponse(allocation, state)).ToArray()
+                    : new[]
+                    {
+                        CreateSeededOrganisationResponse(WasteOrganisationStubIds.SeededDirectProducerOrganisationGuid)!,
+                        CreateSeededOrganisationResponse(WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid)!
+                    }
+            });
+        });
 
         group.MapGet(
             "/organisations/{id:guid}",
@@ -105,7 +119,7 @@ public static class WasteOrganisationsEndpoints
                             allocation.UserIndex
                         );
 
-                    return Results.Ok(CreateOrganisationResponse(allocation));
+                    return Results.Ok(CreateOrganisationResponse(allocation, loadTestSessionState));
                 }
 
                 var seededOrganisation = CreateSeededOrganisationResponse(id);
@@ -118,7 +132,8 @@ public static class WasteOrganisationsEndpoints
     }
 
     private static OrganisationResponseModel CreateOrganisationResponse(
-        LoadTestOrganisationAllocation allocation
+        LoadTestOrganisationAllocation allocation,
+        LoadTestSessionState state
     )
     {
         var registrationType = allocation.IsComplianceScheme
@@ -133,7 +148,7 @@ public static class WasteOrganisationsEndpoints
                 ? allocation.ComplianceSchemeName
                 : null,
             BusinessCountry = "GB-ENG",
-            CompaniesHouseNumber = allocation.IsComplianceScheme ? "12345678" : "17121895",
+            CompaniesHouseNumber = state.CompaniesHouseNumber(allocation),
             Address = new()
             {
                 AddressLine1 = allocation.OrganisationName,
@@ -143,7 +158,14 @@ public static class WasteOrganisationsEndpoints
                 Postcode = "UK1",
                 Country = "UK",
             },
-            Registrations = CreateRegistrations(registrationType),
+            Registrations = state.GetRegistrationYears().Select(year => new RegistrationResponseModel
+            {
+                Status = "REGISTERED",
+                Type = registrationType,
+                RegistrationYear = year,
+                Created = RegistrationTimestamp,
+                Updated = RegistrationTimestamp
+            }).ToArray(),
         };
     }
 

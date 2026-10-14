@@ -1,10 +1,12 @@
+using Microsoft.Extensions.Options;
+
 namespace EprAzureStub;
 
-public sealed class LoadTestSessionState
+public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOptions<LoadTestOptions> options)
 {
     public const string SessionHeaderName = "X-EPR-Load-Test-Session";
 
-    private const int MaximumUserCount = 1000;
+    public int MaximumOrganisationCount => options.Value.MaxOrganisationCount;
     public const int MinimumLeaseDurationSeconds = 60;
     public const int MaximumLeaseDurationSeconds = 86_400;
     public static readonly Guid ComplianceSchemeUserId = Guid.Parse(
@@ -29,7 +31,7 @@ public sealed class LoadTestSessionState
         int leaseDurationSeconds
     )
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
         var expiresAtUtc = now.AddSeconds(leaseDurationSeconds);
 
         lock (_sync)
@@ -54,7 +56,7 @@ public sealed class LoadTestSessionState
 
     public bool RenewRunLease(Guid runId, int leaseDurationSeconds)
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
 
         lock (_sync)
         {
@@ -72,7 +74,7 @@ public sealed class LoadTestSessionState
 
     public LoadTestRunLeaseReleaseResult ReleaseRunLease(Guid runId)
     {
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
 
         lock (_sync)
         {
@@ -89,6 +91,7 @@ public sealed class LoadTestSessionState
             }
 
             _runLease = null;
+            _polling = null;
             if (_session?.RunId == runId)
             {
                 _session = null;
@@ -104,23 +107,23 @@ public sealed class LoadTestSessionState
         int complianceSchemeUserCount
     )
     {
-        var totalUserCount = directProducerUserCount + complianceSchemeUserCount;
+        var totalUserCount = (long)directProducerUserCount + complianceSchemeUserCount;
 
         if (
             directProducerUserCount < 0
             || complianceSchemeUserCount < 0
-            || totalUserCount is < 1 or > MaximumUserCount
+            || totalUserCount < 1 || totalUserCount > MaximumOrganisationCount
         )
         {
             throw new ArgumentOutOfRangeException(
                 nameof(totalUserCount),
-                $"The total user count must be between 1 and {MaximumUserCount}."
+                $"The total user count must be between 1 and {MaximumOrganisationCount}."
             );
         }
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_runLease?.RunId != runId)
             {
@@ -134,7 +137,7 @@ public sealed class LoadTestSessionState
 
             var session = new LoadTestSession(
                 runId,
-                totalUserCount,
+                (int)totalUserCount,
                 directProducerUserCount,
                 complianceSchemeUserCount,
                 CreateAllocations(directProducerUserCount, complianceSchemeUserCount)
@@ -160,14 +163,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_session?.RunId != runId)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            GrowCatalogue();
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.UserId == userId && candidate.UserIndex == userIndex
             )!;
 
@@ -190,14 +194,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
 
             if (_session?.RunId != runId)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            GrowCatalogue();
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.UserId == ComplianceSchemeUserId
                 && candidate.UserIndex == userIndex
                 && candidate.OperatorOrganisationId == operatorOrganisationId
@@ -216,14 +221,15 @@ public sealed class LoadTestSessionState
 
         lock (_sync)
         {
-            ExpireRunLeaseIfNeeded(TimeProvider.System.GetUtcNow());
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
+            GrowCatalogue();
 
             if (_session is null)
             {
                 return false;
             }
 
-            allocation = _session.Allocations.SingleOrDefault(candidate =>
+            allocation = (_polling?.Allocations ?? _session.Allocations).SingleOrDefault(candidate =>
                 candidate.OrganisationId == organisationId
             )!;
 
@@ -256,41 +262,26 @@ public sealed class LoadTestSessionState
         var allocations = new List<LoadTestOrganisationAllocation>();
 
         for (var userIndex = 0; userIndex < directProducerUserCount; userIndex++)
-        {
-            var displayNumber = userIndex + 1;
-
-            allocations.Add(
-                new(
-                    DirectProducerUserId,
-                    userIndex,
-                    Guid.NewGuid(),
-                    null,
-                    $"POP QUEST LTD {displayNumber}",
-                    null
-                )
-            );
-        }
-
+            allocations.Add(CreateAllocation(false, userIndex));
         for (var userIndex = 0; userIndex < complianceSchemeUserCount; userIndex++)
-        {
-            var displayNumber = userIndex + 1;
-
-            allocations.Add(
-                new(
-                    ComplianceSchemeUserId,
-                    userIndex,
-                    Guid.NewGuid(),
-                    // The signed-in CSO session owns this seeded operator organisation.
-                    // Keep it stable so the frontend does not need a load-test-specific
-                    // session override to resolve its organisation number.
-                    WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
-                    $"Organisation Name {displayNumber}",
-                    $"Compliance Scheme Name {displayNumber}"
-                )
-            );
-        }
-
+            allocations.Add(CreateAllocation(true, userIndex));
         return allocations;
+    }
+
+    // Keep identifiers distinct across runs while downstream process-local caches survive.
+    private static int _lastMetadataNumber = 20_000_000;
+
+    private static LoadTestOrganisationAllocation CreateAllocation(bool scheme, int userIndex)
+    {
+        var number = Interlocked.Increment(ref _lastMetadataNumber);
+        if (number > 99_999_999)
+            throw new InvalidOperationException("Synthetic Companies House numbers exhausted.");
+        return new(scheme ? ComplianceSchemeUserId : DirectProducerUserId, userIndex,
+            Guid.NewGuid(), scheme ? Guid.NewGuid() : null,
+            scheme ? $"Organisation Name {userIndex + 1}" : $"POP QUEST LTD {userIndex + 1}",
+            scheme ? $"Compliance Scheme Name {userIndex + 1}" : null,
+            number.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            number.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private void ExpireRunLeaseIfNeeded(DateTimeOffset now)
@@ -299,6 +290,7 @@ public sealed class LoadTestSessionState
         {
             _runLease = null;
             _session = null;
+            _polling = null;
         }
     }
 
@@ -392,7 +384,9 @@ public sealed record LoadTestOrganisationAllocation(
     Guid OrganisationId,
     Guid? OperatorOrganisationId,
     string OrganisationName,
-    string? ComplianceSchemeName
+    string? ComplianceSchemeName,
+    string CompaniesHouseNumber,
+    string ReferenceNumber
 )
 {
     public bool IsComplianceScheme => OperatorOrganisationId.HasValue;
