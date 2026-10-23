@@ -20,6 +20,15 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOpt
     private LoadTestRunLease? _runLease;
     private LoadTestSession? _session;
 
+    public Guid? GetActiveRunId()
+    {
+        lock (_sync)
+        {
+            ExpireRunLeaseIfNeeded(timeProvider.GetUtcNow());
+            return _runLease?.RunId;
+        }
+    }
+
     public static bool IsSupportedUser(Guid userId)
     {
         return userId == ComplianceSchemeUserId || userId == DirectProducerUserId;
