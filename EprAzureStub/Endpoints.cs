@@ -12,5 +12,6 @@ public static class Endpoints
         app.MapEprPrnCommonBackendEndpoints();
         app.MapEprBackendAccountMicroserviceEndpoints();
         app.MapWasteOrganisationsEndpoints();
+        app.MapGovNotifyEndpoints();
     }
 }

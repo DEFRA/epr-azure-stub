@@ -108,3 +108,36 @@ information providers in the public sector to license the use and re-use of thei
 licence.
 
 It is designed to encourage use and re-use of information freely and flexibly, with only a few conditions.
+# Capturing notification requests
+
+The `/govuk-notify` route group implements `GET /v2/templates?type=email` for
+the notification service's health check and `POST /v2/notifications/email` for
+SDK email sends. It returns HTTP 201 with a generated notification ID, the
+submitted reference and template ID, and template version 1. It does not contact
+GOV.UK Notify, send email, render templates or validate Notify JWTs. Use a
+synthetic SDK-shaped API key when pointing the notification service here.
+
+Notify requests are captured only while a load-test run lease is active. Every
+capture includes that lease's `runId`, the same ID supplied when initialising
+`/admin/load-test-sessions`, and its own `acceptedAtUtc` and `expiresAtUtc`.
+All valid sends receive HTTP 201, including sends outside an active run; those
+sends are accepted without capture. Lease renewal extends the capture window.
+Lease release or expiry stops new capture without deleting retained requests.
+
+`GET /admin/notify/notifications?after=0&runId=<runId>` returns an instance ID,
+a global monotonic cursor, a truncation flag and retained requests for that run.
+Omit `runId` to inspect all runs. Save the starting cursor and query after it to
+restrict the observation window. The run ID identifies the active lease at
+acceptance, not the originating declaration; delayed requests from earlier runs
+can arrive during a later run. Repeated references remain separate requests so
+retries remain visible. Requests are not deduplicated by this stub.
+
+Each request expires 24 hours after acceptance by default. Configure
+`NotifyCapture__RetentionSeconds` (60–604800 seconds) to change retention. Expired
+records are removed on the next capture or inspection, independently of the lease.
+The latest 10,000 unexpired requests are retained in memory; a process restart
+clears them and changes the instance ID. Expiry or eviction after a requested
+cursor marks the result truncated, conservatively across all runs. Use one replica.
+Restrict the inspection endpoint to the perf-test runner at ingress:
+responses include names and recipient addresses. The perf-test runner produces
+an HTML view and JSON snapshot; they demonstrate stub acceptance, not delivery.
