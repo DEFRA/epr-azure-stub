@@ -77,6 +77,19 @@ public static class EprBackendAccountMicroserviceEndpoints
                 return Results.NotFound();
             }
             var user = FindSeededUser(userId)!;
+            if (allocation is not null)
+            {
+                return Results.Ok(new
+                {
+                    persons = new[]
+                    {
+                        new { userId = user.UserId, firstName = user.FirstName, lastName = user.LastName,
+                            email = user.Email, serviceRole = "Delegated Person" },
+                        new { userId = allocation.OrganisationId, firstName = "Synthetic", lastName = "Approved Person",
+                            email = $"approved+{allocation.OrganisationId:N}@example.invalid", serviceRole = "Approved Person" }
+                    }
+                });
+            }
             return Results.Ok(new
             {
                 persons = new[] { new

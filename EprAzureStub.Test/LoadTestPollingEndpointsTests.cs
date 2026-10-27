@@ -98,11 +98,17 @@ public class LoadTestPollingEndpointsTests
             }
         }
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/waste-organisations/organisations/{WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid}", TestContext.Current.CancellationToken)).StatusCode);
-        foreach (var id in new[] { initial.Allocations.First().OrganisationId, initial.Allocations.Last().OperatorOrganisationId!.Value })
+        foreach (var allocation in new[] { initial.Allocations.First(), initial.Allocations.Last() })
         {
+            var id = allocation.OperatorOrganisationId ?? allocation.OrganisationId;
             var persons = await Read(client, $"/epr-backend-account-microservice/api/organisations/organisation-with-persons/{id}");
-            Assert.Equal("Approved Person", persons.GetProperty("persons")[0].GetProperty("serviceRole").GetString());
-            Assert.False(string.IsNullOrEmpty(persons.GetProperty("persons")[0].GetProperty("email").GetString()));
+            var contacts = persons.GetProperty("persons").EnumerateArray().ToArray();
+            Assert.Equal(2, contacts.Length);
+            Assert.Equal("Delegated Person", contacts[0].GetProperty("serviceRole").GetString());
+            Assert.Equal("Approved Person", contacts[1].GetProperty("serviceRole").GetString());
+            Assert.Equal($"approved+{allocation.OrganisationId:N}@example.invalid", contacts[1].GetProperty("email").GetString());
+            Assert.Equal(allocation.UserId, contacts[0].GetProperty("userId").GetGuid());
+            Assert.NotEqual(contacts[0].GetProperty("email").GetString(), contacts[1].GetProperty("email").GetString());
         }
     }
 
