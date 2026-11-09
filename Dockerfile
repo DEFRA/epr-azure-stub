@@ -8,7 +8,7 @@ RUN dotnet build EprAzureStub.Test --warnaserror && \
 RUN dotnet publish EprAzureStub -c Release -o /app/publish /p:UseAppHost=false
 
 # Final production image
-FROM mcr.microsoft.com/dotnet/aspnet@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee
+FROM mcr.microsoft.com/dotnet/aspnet@sha256:1a48394b6f29d3a32c79d9edecd4abda0ecbe8776d567dbfc4590ed6979c740c
 WORKDIR /app
 
 # Add curl to template, CDP PLATFORM HEALTHCHECK REQUIREMENT
