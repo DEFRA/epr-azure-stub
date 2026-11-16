@@ -91,6 +91,19 @@ Restrict `/admin/load-test-runs`, `/admin/load-test-sessions` and
 `/admin/load-test-polling` to the performance runner at ingress. All state is
 process-local: deploy one stub replica until lease and catalogue state are shared.
 
+## PRNs and PERNs
+
+The PRN common backend endpoints also serve notes for the fixture organisations and
+every load-test allocation: `GET /epr-prn-common-backend/api/v1/prn/search`,
+`GET /epr-prn-common-backend/api/v1/prn/{prnId}` and
+`POST /epr-prn-common-backend/api/v1/prn/status`, with the backend's filters, sorts,
+paging and acceptance-year rule. A status update applies to the whole batch or none
+of it. Each organisation gets `LoadTest:PrnsPerOrganisation` notes (default 1000):
+every material, PRNs and PERNs, mostly awaiting acceptance, some December waste.
+They are generated from the organisation ID on first use and generated again when
+the run lease changes, so each run starts with the same notes awaiting acceptance.
+The obligation calculation response does not follow accepted notes.
+
 ## Docker Compose
 
 A Docker Compose setup is available in [compose.yml](compose.yml).

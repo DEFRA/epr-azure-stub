@@ -11,6 +11,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddOptions<LoadTestOptions>().BindConfiguration("LoadTest")
     .ValidateDataAnnotations().ValidateOnStart();
 builder.Services.AddSingleton<LoadTestSessionState>();
+builder.Services.AddSingleton<LoadTestPrnState>();
 builder.Services.AddSingleton<NotifyCaptureStore>();
 builder.Services.AddOptions<NotifyCaptureOptions>().BindConfiguration("NotifyCapture")
     .ValidateDataAnnotations().ValidateOnStart();

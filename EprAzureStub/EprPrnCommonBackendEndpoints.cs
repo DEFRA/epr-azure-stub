@@ -5,6 +5,7 @@ namespace EprAzureStub;
 public static class EprPrnCommonBackendEndpoints
 {
     private const string OrganisationHeader = "X-EPR-ORGANISATION";
+    private const string UserHeader = "X-EPR-USER";
     private const int StartYear = 2024;
     private const int EndYear = 2029;
 
@@ -99,6 +100,85 @@ public static class EprPrnCommonBackendEndpoints
                             => Results.Ok(CreateComplianceSchemeResponse(id)),
                     _ => Results.NotFound(),
                 };
+            }
+        );
+
+        group.MapGet(
+            "/api/v1/prn/search",
+            (
+                [FromHeader(Name = OrganisationHeader)] Guid? organisationId,
+                LoadTestPrnState prnState,
+                int page = 1,
+                int pageSize = 10,
+                string? search = null,
+                string? filterBy = null,
+                string? sortBy = null,
+                int? acceptableIntoYear = null
+            ) =>
+            {
+                if (organisationId is null || organisationId == Guid.Empty)
+                {
+                    return Results.BadRequest($"Missing or invalid {OrganisationHeader} header.");
+                }
+
+                var result = prnState.Search(
+                    organisationId.Value,
+                    new PrnSearchQuery(page, pageSize, search, filterBy, sortBy, acceptableIntoYear)
+                );
+
+                // The backend answers an organisation with no notes with an empty page, not a not-found.
+                return Results.Ok(
+                    result ?? new PrnSearchResponse([], page, 0, pageSize, search, filterBy, sortBy)
+                );
+            }
+        );
+
+        group.MapGet(
+            "/api/v1/prn/{prnId:guid}",
+            (Guid prnId, [FromHeader(Name = OrganisationHeader)] Guid? organisationId, LoadTestPrnState prnState) =>
+            {
+                if (organisationId is null || organisationId == Guid.Empty)
+                {
+                    return Results.BadRequest($"Missing or invalid {OrganisationHeader} header.");
+                }
+
+                var prn = prnState.GetPrn(organisationId.Value, prnId);
+
+                return prn is null ? Results.NotFound() : Results.Ok(prn);
+            }
+        );
+
+        group.MapPost(
+            "/api/v1/prn/status",
+            (
+                [FromHeader(Name = OrganisationHeader)] Guid? organisationId,
+                [FromHeader(Name = UserHeader)] Guid? userId,
+                List<PrnStatusUpdateRequest>? updates,
+                LoadTestPrnState prnState
+            ) =>
+            {
+                if (organisationId is null || organisationId == Guid.Empty || userId is null)
+                {
+                    return Results.BadRequest($"Missing or invalid {OrganisationHeader} or {UserHeader} header.");
+                }
+
+                if (
+                    updates is null
+                    || updates.Count == 0
+                    || updates.Any(update =>
+                        !LoadTestPrnState.IsKnownStatus(update.Status)
+                        || (update.ExpectedStatus is { } expected && !LoadTestPrnState.IsKnownStatus(expected))
+                    )
+                )
+                {
+                    return Results.BadRequest("Each update needs a PRN and a known status.");
+                }
+
+                var result = prnState.UpdateStatuses(organisationId.Value, updates);
+
+                return result == PrnStatusUpdateResult.Updated
+                    ? Results.Ok()
+                    : Results.Problem(result.Detail, statusCode: result.StatusCode);
             }
         );
     }
