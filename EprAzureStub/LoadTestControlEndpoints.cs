@@ -14,6 +14,9 @@ public static class LoadTestControlEndpoints
         "browser-load",
         "unsubmitted",
         "unsubmitted-journey",
+        "prns",
+        "prns-lighthouse",
+        "prns-browser-load",
     ];
 
     public static void MapLoadTestControlEndpoints(this IEndpointRouteBuilder app)
@@ -51,7 +54,7 @@ public static class LoadTestControlEndpoints
                 if (!SupportedProfiles.Contains(request.Profile))
                 {
                     return Results.BadRequest(
-                        new { message = "profile must be one of: all, k6, lighthouse, browser-load, unsubmitted, unsubmitted-journey." }
+                        new { message = $"profile must be one of: {string.Join(", ", SupportedProfiles)}." }
                     );
                 }
 

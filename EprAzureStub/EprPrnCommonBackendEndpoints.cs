@@ -6,6 +6,8 @@ public static class EprPrnCommonBackendEndpoints
 {
     private const string OrganisationHeader = "X-EPR-ORGANISATION";
     private const string UserHeader = "X-EPR-USER";
+    private const int MinimumAcceptableIntoYear = 2023;
+    private const int MaximumAcceptableIntoYear = 2050;
     private const int StartYear = 2024;
     private const int EndYear = 2029;
 
@@ -116,19 +118,32 @@ public static class EprPrnCommonBackendEndpoints
                 int? acceptableIntoYear = null
             ) =>
             {
+                // As the backend: no organisation is unauthorised, and a year outside 2023-2050 is invalid.
                 if (organisationId is null || organisationId == Guid.Empty)
                 {
-                    return Results.BadRequest($"Missing or invalid {OrganisationHeader} header.");
+                    return Results.Unauthorized();
                 }
 
-                var result = prnState.Search(
-                    organisationId.Value,
-                    new PrnSearchQuery(page, pageSize, search, filterBy, sortBy, acceptableIntoYear)
+                if (acceptableIntoYear is < MinimumAcceptableIntoYear or > MaximumAcceptableIntoYear)
+                {
+                    return Results.BadRequest(
+                        $"acceptableIntoYear must be from {MinimumAcceptableIntoYear} to {MaximumAcceptableIntoYear}."
+                    );
+                }
+
+                var query = new PrnSearchQuery(
+                    Math.Max(1, page),
+                    Math.Max(1, pageSize),
+                    search,
+                    filterBy,
+                    sortBy,
+                    acceptableIntoYear
                 );
 
                 // The backend answers an organisation with no notes with an empty page, not a not-found.
                 return Results.Ok(
-                    result ?? new PrnSearchResponse([], page, 0, pageSize, search, filterBy, sortBy)
+                    prnState.Search(organisationId.Value, query)
+                        ?? new PrnSearchResponse([], query.Page, 0, query.PageSize, search, filterBy, sortBy)
                 );
             }
         );

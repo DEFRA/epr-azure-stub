@@ -26,6 +26,14 @@ Endpoints to replicate are:
   - Stub variants:
     - LargeProducer
     - ComplianceScheme
+- GET /api/v1/prn/search, GET /api/v1/prn/{prnId}, POST /api/v1/prn/status
+  - The organisation ID is taken from HTTP header `X-EPR-ORGANISATION`; the status update also needs `X-EPR-USER`
+  - Notes come from `LoadTestPrnState`: generated per organisation for the fixtures and load-test allocations
+  - Search follows the backend's `Repository.GetSearchPrnsForOrganisation` (filters, sorts, paging) and its
+    `PaginatedRequestDtoValidator`: 401 without an organisation, 400 for `acceptableIntoYear` outside 2023-2050
+  - `PrnAcceptanceYearRule` is a copy of the backend's `AcceptanceYearRule`; change both together
+  - The status update follows the backend's `PrnService.UpdateStatus`: all or nothing, 404 for an unknown note,
+    409 for a repeated note or a note no longer in its status, with the backend's messages
 - /admin/health
   - A simple GET endpoint that returns 200
 

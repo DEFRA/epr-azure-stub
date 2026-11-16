@@ -81,13 +81,45 @@ public class EprPrnCommonBackendPrnEndpointsTests(WebApplicationFactory<Program>
     }
 
     [Fact]
-    public async Task Search_WithoutOrganisationHeader_ReturnsBadRequest()
+    public async Task Search_WithoutOrganisationHeader_ReturnsUnauthorised()
     {
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync($"{Base}/search", TestContext.Current.CancellationToken);
 
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData(2022)]
+    [InlineData(2051)]
+    public async Task Search_AcceptableIntoYearOutsideTheBackendRange_ReturnsBadRequest(int year)
+    {
+        using var client = factory.CreateClient();
+
+        var response = await client.SendAsync(
+            Get($"{Base}/search?acceptableIntoYear={year}", WasteOrganisationStubIds.LargeProducer),
+            TestContext.Current.CancellationToken
+        );
+
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("page=0&pageSize=0", 1, 1, 1)]
+    [InlineData("page=2147483647&pageSize=100", 2147483647, 100, 0)]
+    public async Task Search_PagingEdges_ReturnTheUsedValuesAndNeverThrow(
+        string query,
+        int expectedPage,
+        int expectedPageSize,
+        int expectedItems
+    )
+    {
+        var page = await Search(WasteOrganisationStubIds.LargeProducer, query);
+
+        Assert.Equal(expectedPage, page.CurrentPage);
+        Assert.Equal(expectedPageSize, page.PageSize);
+        Assert.Equal(expectedItems, page.Items.Count);
     }
 
     [Fact]
@@ -145,6 +177,67 @@ public class EprPrnCommonBackendPrnEndpointsTests(WebApplicationFactory<Program>
         var note = await (await client.SendAsync(Get($"{Base}/{awaiting.ExternalId}", WasteOrganisationStubIds.ComplianceScheme), TestContext.Current.CancellationToken))
             .Content.ReadFromJsonAsync<Prn>(TestContext.Current.CancellationToken);
         Assert.Equal("AWAITINGACCEPTANCE", note!.PrnStatus);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_RepeatingTheSameStatusWithoutAnExpectedStatus_Succeeds()
+    {
+        var note = (await Search(WasteOrganisationStubIds.ComplianceScheme, "filterBy=awaiting-all&page=5&pageSize=1")).Items.Single();
+        using var client = factory.CreateClient();
+
+        var first = await PostStatus(client, [new(note.ExternalId, "REJECTED", null, null)]);
+        var repeat = await PostStatus(client, [new(note.ExternalId, "REJECTED", null, null)]);
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, repeat.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ChangingAnAcceptedNoteWithoutAnExpectedStatus_IsAConflict()
+    {
+        var note = (await Search(WasteOrganisationStubIds.ComplianceScheme, "filterBy=awaiting-all&page=6&pageSize=1")).Items.Single();
+        using var client = factory.CreateClient();
+
+        await PostStatus(client, [new(note.ExternalId, "ACCEPTED", null, null)]);
+        var change = await PostStatus(client, [new(note.ExternalId, "REJECTED", null, null)]);
+
+        Assert.Equal(HttpStatusCode.Conflict, change.StatusCode);
+        Assert.Contains("cannot be accepted or rejected", await change.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ABatchWithOneConflict_LeavesTheOtherNotesUnchanged()
+    {
+        var notes = (await Search(WasteOrganisationStubIds.ComplianceScheme, "filterBy=awaiting-all&page=4&pageSize=2")).Items;
+        using var client = factory.CreateClient();
+        await PostStatus(client, [new(notes[1].ExternalId, "ACCEPTED", null, null)]);
+
+        var batch = await PostStatus(
+            client,
+            [new(notes[0].ExternalId, "ACCEPTED", null, "AWAITINGACCEPTANCE"), new(notes[1].ExternalId, "ACCEPTED", null, "AWAITINGACCEPTANCE")]
+        );
+
+        Assert.Equal(HttpStatusCode.Conflict, batch.StatusCode);
+        Assert.Contains("is no longer AWAITINGACCEPTANCE", await batch.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+        var untouched = await (await client.SendAsync(Get($"{Base}/{notes[0].ExternalId}", WasteOrganisationStubIds.ComplianceScheme), TestContext.Current.CancellationToken))
+            .Content.ReadFromJsonAsync<Prn>(TestContext.Current.CancellationToken);
+        Assert.Equal("AWAITINGACCEPTANCE", untouched!.PrnStatus);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_TwoParallelAcceptsOfTheSameNote_OneSucceedsAndOneConflicts()
+    {
+        var note = (await Search(WasteOrganisationStubIds.ComplianceScheme, "filterBy=awaiting-all&page=7&pageSize=1")).Items.Single();
+        using var first = factory.CreateClient();
+        using var second = factory.CreateClient();
+
+        var responses = await Task.WhenAll(
+            PostStatus(first, [new(note.ExternalId, "ACCEPTED", null, "AWAITINGACCEPTANCE")]),
+            PostStatus(second, [new(note.ExternalId, "ACCEPTED", null, "AWAITINGACCEPTANCE")])
+        );
+
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, response => response.StatusCode == HttpStatusCode.Conflict);
     }
 
     [Fact]

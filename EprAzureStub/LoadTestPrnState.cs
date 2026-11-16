@@ -9,7 +9,7 @@ namespace EprAzureStub;
 /// Generated PRNs and PERNs for every organisation the stub knows: the load-test allocations and the
 /// static fixtures. Each organisation's notes are generated on first use from its ID, so they are the
 /// same on every request, and their statuses change through <see cref="UpdateStatuses"/>. Everything
-/// is cleared when the run lease changes, so each run starts with the same notes awaiting acceptance.
+/// is cleared when a new run lease starts, so each run starts with the same notes awaiting acceptance.
 /// </summary>
 public sealed class LoadTestPrnState(
     LoadTestSessionState loadTestSessionState,
@@ -73,15 +73,6 @@ public sealed class LoadTestPrnState(
     private readonly Dictionary<Guid, List<StubPrn>> _prnsByOrganisation = [];
     private Guid? _runId;
 
-    /// <summary>The organisation's notes, or null when the stub doesn't know the organisation.</summary>
-    public IReadOnlyList<PrnResponse>? GetPrns(Guid organisationId)
-    {
-        lock (_sync)
-        {
-            return GetOrCreate(organisationId)?.Select(prn => prn.ToResponse()).ToList();
-        }
-    }
-
     public PrnResponse? GetPrn(Guid organisationId, Guid prnId)
     {
         lock (_sync)
@@ -132,14 +123,17 @@ public sealed class LoadTestPrnState(
             var ordered = descending
                 ? matched.OrderByDescending(key).ThenBy(prn => prn.PrnNumber, StringComparer.Ordinal)
                 : matched.OrderBy(key).ThenBy(prn => prn.PrnNumber, StringComparer.Ordinal);
-            var page = Math.Max(1, query.Page);
-            var pageSize = Math.Max(1, query.PageSize);
+            // The endpoint passes a page and page size of at least 1; a page past the end is empty.
+            var skip = ((long)query.Page - 1) * query.PageSize;
+            var items = skip >= matched.Count
+                ? []
+                : ordered.Skip((int)skip).Take(query.PageSize).Select(prn => prn.ToResponse()).ToList();
 
             return new PrnSearchResponse(
-                ordered.Skip((page - 1) * pageSize).Take(pageSize).Select(prn => prn.ToResponse()).ToList(),
-                page,
+                items,
+                query.Page,
                 matched.Count,
-                pageSize,
+                query.PageSize,
                 query.Search,
                 query.FilterBy,
                 query.SortBy
@@ -211,11 +205,17 @@ public sealed class LoadTestPrnState(
             foreach (var update in updates)
             {
                 var prn = prns.Single(candidate => candidate.ExternalId == update.PrnId);
-                var allowed = update.ExpectedStatus is { } expected
-                    ? prn.Status == expected
-                    : prn.Status == AwaitingAcceptance || prn.Status == update.Status;
 
-                if (!allowed)
+                // The backend's two rules and messages: with an expected status the note must still be in it;
+                // without one it must be awaiting acceptance or already in the requested status.
+                if (update.ExpectedStatus is { } expected && prn.Status != expected)
+                {
+                    return PrnStatusUpdateResult.Conflict(
+                        $"{update.PrnId} is no longer {expected} and cannot be updated. Please refresh and try again"
+                    );
+                }
+
+                if (update.ExpectedStatus is null && prn.Status != AwaitingAcceptance && prn.Status != update.Status)
                 {
                     return PrnStatusUpdateResult.Conflict(
                         $"{update.PrnId} cannot be accepted or rejected please refresh and try again"
@@ -246,9 +246,9 @@ public sealed class LoadTestPrnState(
 
     private List<StubPrn>? GetOrCreate(Guid organisationId)
     {
-        var activeRunId = loadTestSessionState.GetActiveRunId();
-
-        if (activeRunId != _runId)
+        // A new run starts from fresh notes. A lease that ends or expires mid-run (a missed heartbeat) keeps
+        // them, so notes already accepted or rejected don't come back as awaiting while users are running.
+        if (loadTestSessionState.GetActiveRunId() is { } activeRunId && activeRunId != _runId)
         {
             _prnsByOrganisation.Clear();
             _runId = activeRunId;
@@ -310,7 +310,9 @@ public sealed class LoadTestPrnState(
                 ? NotAfter(new DateTime(obligationYear, 12, 1 + (index % 28), 10, 0, 0, DateTimeKind.Utc), now)
                 : IssueDateWithinYear(obligationYear, index, now);
             var created = issueDate.AddHours(1);
-            var number = ((seed + index * 7919) % 900_000 + 100_000).ToString(CultureInfo.InvariantCulture);
+            // 7919 is prime and shares no factor with 900 000, so up to 900 000 notes get different numbers.
+            // Long arithmetic: the seed can be as large as int.MaxValue.
+            var number = (((long)seed + (long)index * 7919) % 900_000 + 100_000).ToString(CultureInfo.InvariantCulture);
             var yearSuffix = (obligationYear % 100).ToString("00", CultureInfo.InvariantCulture);
 
             prns.Add(
@@ -333,7 +335,7 @@ public sealed class LoadTestPrnState(
                     Status = status,
                     IssuedByOrg = Issuers[index % Issuers.Length],
                     ReprocessorExporterAgency = Agencies[index % Agencies.Length],
-                    AccreditationNumber = $"{(isExport ? "EX" : "ER")}-ACC-{(seed + index) % 100_000:00000}",
+                    AccreditationNumber = $"{(isExport ? "EX" : "ER")}-ACC-{((long)seed + index) % 100_000:00000}",
                     ProcessToBeUsed = $"R{3 + index % 3}",
                     ReprocessingSite = isExport ? null : $"Unit {1 + index % 40}, Industrial Estate",
                     PrnSignatory = "Stub Signatory",
