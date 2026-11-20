@@ -120,7 +120,7 @@ public class LoadTestPrnStateTests
     }
 
     [Fact]
-    public async Task Notes_StayAsTheyAreWhenTheLeaseExpires_AndStartAgainWithANewRun()
+    public async Task FixtureNotes_StayAsTheyAreWhenTheLeaseExpires_AndStartAgainWithANewRun()
     {
         var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
         using var factory = Factory(clock);
@@ -142,6 +142,69 @@ public class LoadTestPrnStateTests
         Assert.Equal("AWAITINGACCEPTANCE", (await Read(client, note.ExternalId)).PrnStatus);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AllocatedNotes_EndWithTheLease(bool expire)
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var runId = Guid.NewGuid();
+        await StartRun(client, runId);
+        var session = await client.PostAsJsonAsync(
+            "/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(runId, 1, 0),
+            token
+        );
+        var organisationId = (await session.Content.ReadFromJsonAsync<LoadTestSessionResponse>(token))!
+            .Users.SelectMany(user => user.Allocations)
+            .Single()
+            .OrganisationId;
+        var note = (await Search(client, "filterBy=awaiting-all&pageSize=1", organisationId)).Items.Single();
+
+        if (expire)
+        {
+            clock.Advance(120);
+        }
+        else
+        {
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                (await client.DeleteAsync($"/admin/load-test-runs/{runId}", token)).StatusCode
+            );
+        }
+
+        Assert.Equal(0, (await Search(client, "filterBy=awaiting-all", organisationId)).TotalItems);
+        using var read = new HttpRequestMessage(HttpMethod.Get, $"{Base}/{note.ExternalId}");
+        read.Headers.Add(OrganisationHeader, organisationId.ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(read, token)).StatusCode);
+        using var accept = new HttpRequestMessage(HttpMethod.Post, $"{Base}/status")
+        {
+            Content = JsonContent.Create(new[] { new { prnId = note.ExternalId, status = "ACCEPTED" } }),
+        };
+        accept.Headers.Add(OrganisationHeader, organisationId.ToString());
+        accept.Headers.Add("X-EPR-USER", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(accept, token)).StatusCode);
+    }
+
+    [Fact]
+    public void Generate_GivesEveryBackendMaterialNotesAwaitingAcceptance()
+    {
+        var prns = LoadTestPrnState.Generate(Guid.NewGuid(), "Organisation", 1000, BeforeChoiceWindow);
+
+        Assert.Equal(10, LoadTestPrnState.Materials.Count);
+        Assert.Contains("Fibre", LoadTestPrnState.Materials);
+        Assert.All(
+            LoadTestPrnState.Materials,
+            material => Assert.Contains(
+                prns,
+                prn => prn.MaterialName == material && prn.Status == LoadTestPrnState.AwaitingAcceptance
+            )
+        );
+    }
+
     private static WebApplicationFactory<Program> Factory(TimeProvider clock) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
@@ -159,10 +222,13 @@ public class LoadTestPrnStateTests
         Assert.Equal(HttpStatusCode.Created, lease.StatusCode);
     }
 
-    private static async Task<SearchPage> Search(HttpClient client, string query)
+    private static async Task<SearchPage> Search(HttpClient client, string query, Guid? organisationId = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{Base}/search?{query}");
-        request.Headers.Add(OrganisationHeader, WasteOrganisationStubIds.SeededDirectProducerOrganisation);
+        request.Headers.Add(
+            OrganisationHeader,
+            organisationId?.ToString() ?? WasteOrganisationStubIds.SeededDirectProducerOrganisation
+        );
         var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 

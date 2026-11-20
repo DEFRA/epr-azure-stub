@@ -32,6 +32,9 @@ public sealed class LoadTestPrnState(
         "Plastic",
         "Steel",
         "Wood",
+        "Paper Composting",
+        "Wood Composting",
+        "Fibre",
     ];
 
     private static readonly IReadOnlyDictionary<string, int> StatusIds = new Dictionary<string, int>
@@ -70,7 +73,10 @@ public sealed class LoadTestPrnState(
     ];
 
     private readonly Lock _sync = new();
-    private readonly Dictionary<Guid, List<StubPrn>> _prnsByOrganisation = [];
+    // Fixture organisations aren't allocations: their notes outlast a lease and start again with a new run.
+    private readonly Dictionary<Guid, List<StubPrn>> _fixturePrns = [];
+    // An allocated organisation's notes belong to the run that allocated it and go when its lease ends.
+    private readonly Dictionary<Guid, List<StubPrn>> _allocatedPrns = [];
     private Guid? _runId;
 
     public PrnResponse? GetPrn(Guid organisationId, Guid prnId)
@@ -246,36 +252,45 @@ public sealed class LoadTestPrnState(
 
     private List<StubPrn>? GetOrCreate(Guid organisationId)
     {
-        // A new run starts from fresh notes. A lease that ends or expires mid-run (a missed heartbeat) keeps
-        // them, so notes already accepted or rejected don't come back as awaiting while users are running.
-        if (loadTestSessionState.GetActiveRunId() is { } activeRunId && activeRunId != _runId)
+        // When the lease is released or expires, the run's allocations are gone from every stub, so its
+        // allocated notes go too. A new run starts the fixtures' notes again; between runs they stay as they are.
+        var activeRunId = loadTestSessionState.GetActiveRunId();
+        if (activeRunId != _runId)
         {
-            _prnsByOrganisation.Clear();
+            _allocatedPrns.Clear();
+            if (activeRunId is not null)
+            {
+                _fixturePrns.Clear();
+            }
             _runId = activeRunId;
         }
 
-        if (_prnsByOrganisation.TryGetValue(organisationId, out var existing))
+        if (FixtureOrganisationIds.Contains(organisationId))
         {
-            return existing;
+            return GetOrGenerate(_fixturePrns, organisationId, "Stub organisation");
         }
 
-        string recipientName;
-
+        // Checked on every call, not only when generating, so notes are never served for an allocation
+        // that has ended.
         if (loadTestSessionState.TryGetAllocationForOrganisation(organisationId, out var allocation))
         {
-            recipientName = allocation.ComplianceSchemeName ?? allocation.OrganisationName;
-        }
-        else if (FixtureOrganisationIds.Contains(organisationId))
-        {
-            recipientName = "Stub organisation";
-        }
-        else
-        {
-            return null;
+            return GetOrGenerate(
+                _allocatedPrns,
+                organisationId,
+                allocation.ComplianceSchemeName ?? allocation.OrganisationName
+            );
         }
 
-        var prns = Generate(organisationId, recipientName, options.Value.PrnsPerOrganisation, timeProvider.GetUtcNow());
-        _prnsByOrganisation[organisationId] = prns;
+        return null;
+    }
+
+    private List<StubPrn> GetOrGenerate(Dictionary<Guid, List<StubPrn>> store, Guid organisationId, string recipientName)
+    {
+        if (!store.TryGetValue(organisationId, out var prns))
+        {
+            prns = Generate(organisationId, recipientName, options.Value.PrnsPerOrganisation, timeProvider.GetUtcNow());
+            store[organisationId] = prns;
+        }
 
         return prns;
     }
@@ -322,7 +337,9 @@ public sealed class LoadTestPrnState(
                     PrnNumber = $"{(isExport ? "EX" : "ER")}{yearSuffix}{number}",
                     OrganisationId = organisationId,
                     OrganisationName = recipientName,
-                    MaterialName = Materials[index % Materials.Count],
+                    // Shifted by one each pass through the list, so no material is tied to one status
+                    // (the status also follows index % 10).
+                    MaterialName = Materials[(index + index / Materials.Count) % Materials.Count],
                     TonnageValue = 5 + ((seed / 7 + index * 37) % 495),
                     IsExport = isExport,
                     DecemberWaste = decemberWaste,

@@ -99,14 +99,16 @@ every load-test allocation: `GET /epr-prn-common-backend/api/v1/prn/search`,
 `POST /epr-prn-common-backend/api/v1/prn/status`, with the backend's filters, sorts,
 paging and acceptance-year rule. A status update applies to the whole batch or none
 of it. Each organisation gets `LoadTest:PrnsPerOrganisation` notes (default 1000):
-every material, PRNs and PERNs, mostly awaiting acceptance, some December waste.
+every material the backend stores (including Fibre, Paper Composting and Wood
+Composting), PRNs and PERNs, mostly awaiting acceptance, some December waste.
 About 650 of each organisation's 1000 notes can be accepted into the current year;
 set the option from the planned users, iterations and notes used per iteration.
 They are generated from the organisation ID on first use and generated again when a
-new run lease starts, so each run starts with the same notes awaiting acceptance. A
-lease that ends or expires during a run keeps the notes as they are. Each organisation
-that reaches these endpoints keeps its notes in memory (about 0.5 MB per 1000) until
-the next run. The obligation calculation response does not follow accepted notes.
+new run lease starts, so each run starts with the same notes awaiting acceptance. When
+the lease is released or expires, an allocated organisation's notes go with its
+allocation: search returns an empty page, and reading or updating a note returns 404.
+Fixture organisations keep their notes until the next run. Each organisation that
+reaches these endpoints keeps its notes in memory (about 0.5 MB per 1000). The obligation calculation response does not follow accepted notes.
 
 Differences from the backend, for inputs Waste Obligations doesn't send: statuses are
 upper-case names only (not lower case or numbers), an empty batch is a 400, a PRN ID

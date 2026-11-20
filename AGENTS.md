@@ -32,6 +32,10 @@ Endpoints to replicate are:
   - Search follows the backend's `Repository.GetSearchPrnsForOrganisation` (filters, sorts, paging) and its
     `PaginatedRequestDtoValidator`: 401 without an organisation, 400 for `acceptableIntoYear` outside 2023-2050
   - `PrnAcceptanceYearRule` is a copy of the backend's `AcceptanceYearRule`; change both together
+  - Generated data uses every value the upstream stores: take lists such as materials from the upstream
+    constants (`PrnConstants.Materials`), or say in the README which values are left out and why. Check that
+    each value can still reach every status: values chosen by `index % n` alongside other `index % n` fields
+    can end up tied to one status
   - The status update follows the backend's `PrnService.UpdateStatus`: all or nothing, 404 for an unknown note,
     409 for a repeated note or a note no longer in its status, with the backend's messages
 - /admin/health
@@ -87,6 +91,8 @@ These routes are specific to this stub and do not replicate an upstream service 
   - `POST` acquires the single exclusive run lease for a `runId`, profile, and bounded lease duration. A different active run must receive `409 Conflict`; the same run can renew idempotently.
   - `PUT /{runId}` renews the matching lease and `DELETE /{runId}` releases it. Releasing a different run's lease must return `409 Conflict`.
   - Lease expiry must clear the matching allocations so an interrupted run cannot leave generated organisation mappings available forever. The performance-test root entrypoint owns acquisition, heartbeat, and release for all profiles.
+  - State built from an allocation (for example `LoadTestPrnState`'s generated notes) belongs to the run that created it. Check the allocation is still active on every request, before returning cached state, and remove that state when the lease is released or expires, not only when a different run starts. Don't keep it to survive a missed heartbeat: an expired lease has already ended the run for the other stubs.
+  - Fixture organisations are not allocations. Their state may persist across runs; keep fixture and allocation state in separate stores so clearing one never touches the other.
   - These controls are administrative endpoints. Restrict `/admin/load-test-runs` and `/admin/load-test-sessions` to the performance-test runner at ingress; do not expose them publicly.
   - Lease and allocation state are process-local. Deploy a single stub replica while this in-memory implementation is used; move both to shared durable state before scaling out.
 
