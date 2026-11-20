@@ -91,6 +91,30 @@ Restrict `/admin/load-test-runs`, `/admin/load-test-sessions` and
 `/admin/load-test-polling` to the performance runner at ingress. All state is
 process-local: deploy one stub replica until lease and catalogue state are shared.
 
+## PRNs and PERNs
+
+The PRN common backend endpoints also serve notes for the fixture organisations and
+every load-test allocation: `GET /epr-prn-common-backend/api/v1/prn/search`,
+`GET /epr-prn-common-backend/api/v1/prn/{prnId}` and
+`POST /epr-prn-common-backend/api/v1/prn/status`, with the backend's filters, sorts,
+paging and acceptance-year rule. A status update applies to the whole batch or none
+of it. Each organisation gets `LoadTest:PrnsPerOrganisation` notes (default 1000):
+every material the backend stores (including Fibre, Paper Composting and Wood
+Composting), PRNs and PERNs, mostly awaiting acceptance, some December waste.
+About 650 of each organisation's 1000 notes can be accepted into the current year;
+set the option from the planned users, iterations and notes used per iteration.
+They are generated from the organisation ID on first use and generated again when a
+new run lease starts, so each run starts with the same notes awaiting acceptance. When
+the lease is released or expires, an allocated organisation's notes go with its
+allocation: search returns an empty page, and reading or updating a note returns 404.
+Fixture organisations keep their notes until the next run. Each organisation that
+reaches these endpoints keeps its notes in memory (about 0.5 MB per 1000). The obligation calculation response does not follow accepted notes.
+
+Differences from the backend, for inputs Waste Obligations doesn't send: statuses are
+upper-case names only (not lower case or numbers), an empty batch is a 400, and a PRN
+ID that isn't a GUID is a 404. As in the backend, `awaiting-paperfiber` matches
+`Paper/board` and `Fibre`.
+
 ## Docker Compose
 
 A Docker Compose setup is available in [compose.yml](compose.yml).

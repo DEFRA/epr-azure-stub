@@ -26,6 +26,18 @@ Endpoints to replicate are:
   - Stub variants:
     - LargeProducer
     - ComplianceScheme
+- GET /api/v1/prn/search, GET /api/v1/prn/{prnId}, POST /api/v1/prn/status
+  - The organisation ID is taken from HTTP header `X-EPR-ORGANISATION`; the status update also needs `X-EPR-USER`
+  - Notes come from `LoadTestPrnState`: generated per organisation for the fixtures and load-test allocations
+  - Search follows the backend's `Repository.GetSearchPrnsForOrganisation` (filters, sorts, paging) and its
+    `PaginatedRequestDtoValidator`: 401 without an organisation, 400 for `acceptableIntoYear` outside 2023-2050
+  - `PrnAcceptanceYearRule` is a copy of the backend's `AcceptanceYearRule`; change both together
+  - Generated data uses every value the upstream stores: take lists such as materials from the upstream
+    constants (`PrnConstants.Materials`), or say in the README which values are left out and why. Check that
+    each value can still reach every status: values chosen by `index % n` alongside other `index % n` fields
+    can end up tied to one status
+  - The status update follows the backend's `PrnService.UpdateStatus`: all or nothing, 404 for an unknown note,
+    409 for a repeated note or a note no longer in its status, with the backend's messages
 - /admin/health
   - A simple GET endpoint that returns 200
 
@@ -79,6 +91,12 @@ These routes are specific to this stub and do not replicate an upstream service 
   - `POST` acquires the single exclusive run lease for a `runId`, profile, and bounded lease duration. A different active run must receive `409 Conflict`; the same run can renew idempotently.
   - `PUT /{runId}` renews the matching lease and `DELETE /{runId}` releases it. Releasing a different run's lease must return `409 Conflict`.
   - Lease expiry must clear the matching allocations so an interrupted run cannot leave generated organisation mappings available forever. The performance-test root entrypoint owns acquisition, heartbeat, and release for all profiles.
+  - State built from an allocation (for example `LoadTestPrnState`'s generated notes) belongs to the run that created it. Check the allocation is still active on every request, before returning cached state, and remove that state when the lease is released or expires, not only when a different run starts or on the next request. Don't keep it to survive a missed heartbeat: an expired lease has already ended the run for the other stubs.
+    - Remove it by subscribing to `LoadTestSessionState.RunEnded`, which fires on release and on expiry, as `LoadTestPrnState.ClearAllocatedNotes` does.
+    - `RunEnded` runs while `LoadTestSessionState` holds its lock. A subscriber may take its own lock in the handler, but must never call `LoadTestSessionState` while holding that lock: read the session first, then lock (see `LoadTestPrnState.LookUp`). Otherwise a release and a request can deadlock.
+    - Guard against a lease ending between that read and taking the lock (`LoadTestPrnState` compares a count of ended runs). A request that read the session before a lease ended is stale: it must not generate cleared state again, and must not act on the run ID it read, for example to reset other state, because a new run may have started since.
+    - Expiry is noticed on the next call that reads the lease, from any stub or the runner, not on a timer.
+  - Fixture organisations are not allocations. Their state may persist across runs; keep fixture and allocation state in separate stores so clearing one never touches the other.
   - These controls are administrative endpoints. Restrict `/admin/load-test-runs` and `/admin/load-test-sessions` to the performance-test runner at ingress; do not expose them publicly.
   - Lease and allocation state are process-local. Deploy a single stub replica while this in-memory implementation is used; move both to shared durable state before scaling out.
 
