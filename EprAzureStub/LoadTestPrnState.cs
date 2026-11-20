@@ -8,15 +8,32 @@ namespace EprAzureStub;
 /// <summary>
 /// Generated PRNs and PERNs for every organisation the stub knows: the load-test allocations and the
 /// static fixtures. Each organisation's notes are generated on first use from its ID, so they are the
-/// same on every request, and their statuses change through <see cref="UpdateStatuses"/>. Everything
-/// is cleared when a new run lease starts, so each run starts with the same notes awaiting acceptance.
+/// same on every request, and their statuses change through <see cref="UpdateStatuses"/>. Allocated
+/// organisations' notes are cleared when their lease ends; fixture notes start again with a new run.
 /// </summary>
-public sealed class LoadTestPrnState(
-    LoadTestSessionState loadTestSessionState,
-    TimeProvider timeProvider,
-    IOptions<LoadTestOptions> options
-)
+/// <remarks>
+/// Lock order: <see cref="LoadTestSessionState"/> raises <see cref="LoadTestSessionState.RunEnded"/> while
+/// holding its lock, and the handler here takes <c>_sync</c>. So this class reads the session before
+/// taking <c>_sync</c>, never while holding it.
+/// </remarks>
+public sealed class LoadTestPrnState
 {
+    private readonly LoadTestSessionState loadTestSessionState;
+    private readonly TimeProvider timeProvider;
+    private readonly IOptions<LoadTestOptions> options;
+
+    public LoadTestPrnState(
+        LoadTestSessionState loadTestSessionState,
+        TimeProvider timeProvider,
+        IOptions<LoadTestOptions> options
+    )
+    {
+        this.loadTestSessionState = loadTestSessionState;
+        this.timeProvider = timeProvider;
+        this.options = options;
+        loadTestSessionState.RunEnded += ClearAllocatedNotes;
+    }
+
     public const string AwaitingAcceptance = "AWAITINGACCEPTANCE";
     public const string Accepted = "ACCEPTED";
     public const string Rejected = "REJECTED";
@@ -77,13 +94,18 @@ public sealed class LoadTestPrnState(
     private readonly Dictionary<Guid, List<StubPrn>> _fixturePrns = [];
     // An allocated organisation's notes belong to the run that allocated it and go when its lease ends.
     private readonly Dictionary<Guid, List<StubPrn>> _allocatedPrns = [];
-    private Guid? _runId;
+    private Guid? _fixtureRunId;
+    // Counts ended leases, so a request that looked up its allocation just before a lease ended doesn't
+    // generate that allocation's notes again after they were cleared.
+    private int _runsEnded;
 
     public PrnResponse? GetPrn(Guid organisationId, Guid prnId)
     {
+        var owner = LookUp(organisationId);
+
         lock (_sync)
         {
-            return GetOrCreate(organisationId)?.SingleOrDefault(prn => prn.ExternalId == prnId)?.ToResponse();
+            return GetOrCreate(owner)?.SingleOrDefault(prn => prn.ExternalId == prnId)?.ToResponse();
         }
     }
 
@@ -92,11 +114,15 @@ public sealed class LoadTestPrnState(
     /// the years a note can be accepted into, then the sort (ties by number) and the page. The total is
     /// counted before paging. Null when the stub doesn't know the organisation.
     /// </summary>
-    public PrnSearchResponse? Search(Guid organisationId, PrnSearchQuery query)
+    public PrnSearchResponse? Search(Guid organisationId, PrnSearchQuery query) =>
+        Search(LookUp(organisationId), query);
+
+    // Internal so tests can end or start a lease between the lookup and taking the lock.
+    internal PrnSearchResponse? Search(NotesOwner owner, PrnSearchQuery query)
     {
         lock (_sync)
         {
-            var prns = GetOrCreate(organisationId);
+            var prns = GetOrCreate(owner);
 
             if (prns is null)
             {
@@ -157,7 +183,9 @@ public sealed class LoadTestPrnState(
             "awaiting-aluminium" => Awaiting("Aluminium"),
             "awaiting-glassother" => Awaiting("Glass Other"),
             "awaiting-glassremelt" => Awaiting("Glass Re-melt"),
-            "awaiting-paperfiber" => Awaiting("Paper/board"),
+            // The backend counts Fibre as paper here; Waste Obligations sends this filter for Paper.
+            "awaiting-paperfiber" => prn =>
+                prn.Status == AwaitingAcceptance && prn.MaterialName is "Paper/board" or "Fibre",
             "awaiting-plastic" => Awaiting("Plastic"),
             "awaiting-steel" => Awaiting("Steel"),
             "awaiting-wood" => Awaiting("Wood"),
@@ -192,9 +220,11 @@ public sealed class LoadTestPrnState(
             return PrnStatusUpdateResult.Conflict("A batch cannot name the same PRN more than once. No PRNs were updated.");
         }
 
+        var owner = LookUp(organisationId);
+
         lock (_sync)
         {
-            var prns = GetOrCreate(organisationId);
+            var prns = GetOrCreate(owner);
 
             if (prns is null || prns.Count == 0)
             {
@@ -250,38 +280,83 @@ public sealed class LoadTestPrnState(
 
     public static bool IsKnownStatus(string status) => StatusIds.ContainsKey(status);
 
-    private List<StubPrn>? GetOrCreate(Guid organisationId)
+    internal readonly record struct NotesOwner(
+        Guid OrganisationId,
+        bool IsFixture,
+        string? RecipientName,
+        Guid? ActiveRunId,
+        int RunsEnded
+    );
+
+    // Reads the session outside _sync (see the lock order on the class). The allocation is checked on
+    // every request, not only when generating, so notes are never served for an allocation that has ended.
+    internal NotesOwner LookUp(Guid organisationId)
     {
-        // When the lease is released or expires, the run's allocations are gone from every stub, so its
-        // allocated notes go too. A new run starts the fixtures' notes again; between runs they stay as they are.
+        var runsEnded = Volatile.Read(ref _runsEnded);
         var activeRunId = loadTestSessionState.GetActiveRunId();
-        if (activeRunId != _runId)
-        {
-            _allocatedPrns.Clear();
-            if (activeRunId is not null)
-            {
-                _fixturePrns.Clear();
-            }
-            _runId = activeRunId;
-        }
 
         if (FixtureOrganisationIds.Contains(organisationId))
         {
-            return GetOrGenerate(_fixturePrns, organisationId, "Stub organisation");
+            return new NotesOwner(organisationId, true, "Stub organisation", activeRunId, runsEnded);
         }
 
-        // Checked on every call, not only when generating, so notes are never served for an allocation
-        // that has ended.
-        if (loadTestSessionState.TryGetAllocationForOrganisation(organisationId, out var allocation))
+        var recipientName = loadTestSessionState.TryGetAllocationForOrganisation(organisationId, out var allocation)
+            ? allocation.ComplianceSchemeName ?? allocation.OrganisationName
+            : null;
+
+        return new NotesOwner(organisationId, false, recipientName, activeRunId, runsEnded);
+    }
+
+    // Called under _sync.
+    private List<StubPrn>? GetOrCreate(NotesOwner owner)
+    {
+        // A lease ended after this request's lookup, so what it read about the run is out of date.
+        var stale = owner.RunsEnded != _runsEnded;
+
+        // A new run starts the fixtures' notes again; between runs they stay as they are. A stale request
+        // must not do this: it could carry the previous run's ID and wipe notes the new run has changed.
+        if (!stale && owner.ActiveRunId is { } activeRunId && activeRunId != _fixtureRunId)
         {
-            return GetOrGenerate(
-                _allocatedPrns,
-                organisationId,
-                allocation.ComplianceSchemeName ?? allocation.OrganisationName
-            );
+            _fixturePrns.Clear();
+            _fixtureRunId = activeRunId;
         }
 
-        return null;
+        if (owner.IsFixture)
+        {
+            return GetOrGenerate(_fixturePrns, owner.OrganisationId, owner.RecipientName!);
+        }
+
+        // No allocation, or its lease ended after the lookup and its notes were cleared: don't bring them back.
+        if (owner.RecipientName is null || stale)
+        {
+            return null;
+        }
+
+        return GetOrGenerate(_allocatedPrns, owner.OrganisationId, owner.RecipientName);
+    }
+
+    // Raised by the session when a lease is released or expires: the run's allocations are gone from
+    // every stub, so their notes go now rather than staying in memory until the next request.
+    private void ClearAllocatedNotes()
+    {
+        lock (_sync)
+        {
+            _allocatedPrns.Clear();
+            // Fixture notes stay until the next run starts, even one that re-uses this run's ID.
+            _fixtureRunId = null;
+            Interlocked.Increment(ref _runsEnded);
+        }
+    }
+
+    internal int AllocatedOrganisationCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _allocatedPrns.Count;
+            }
+        }
     }
 
     private List<StubPrn> GetOrGenerate(Dictionary<Guid, List<StubPrn>> store, Guid organisationId, string recipientName)

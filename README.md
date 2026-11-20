@@ -111,8 +111,9 @@ Fixture organisations keep their notes until the next run. Each organisation tha
 reaches these endpoints keeps its notes in memory (about 0.5 MB per 1000). The obligation calculation response does not follow accepted notes.
 
 Differences from the backend, for inputs Waste Obligations doesn't send: statuses are
-upper-case names only (not lower case or numbers), an empty batch is a 400, a PRN ID
-that isn't a GUID is a 404, and `awaiting-paperfiber` matches `Paper/board` only.
+upper-case names only (not lower case or numbers), an empty batch is a 400, and a PRN
+ID that isn't a GUID is a 404. As in the backend, `awaiting-paperfiber` matches
+`Paper/board` and `Fibre`.
 
 ## Docker Compose
 

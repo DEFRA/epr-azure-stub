@@ -20,6 +20,13 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOpt
     private LoadTestRunLease? _runLease;
     private LoadTestSession? _session;
 
+    /// <summary>
+    /// Raised when a lease is released or found expired, after its allocations are cleared, so state built
+    /// from them can go too. Handlers run while this class holds its lock: a handler may take its own lock,
+    /// but its class must never call this class while holding that lock.
+    /// </summary>
+    public event Action? RunEnded;
+
     public Guid? GetActiveRunId()
     {
         lock (_sync)
@@ -105,6 +112,7 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOpt
             {
                 _session = null;
             }
+            RunEnded?.Invoke();
 
             return LoadTestRunLeaseReleaseResult.Released;
         }
@@ -300,6 +308,7 @@ public sealed partial class LoadTestSessionState(TimeProvider timeProvider, IOpt
             _runLease = null;
             _session = null;
             _polling = null;
+            RunEnded?.Invoke();
         }
     }
 

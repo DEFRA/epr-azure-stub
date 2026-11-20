@@ -189,6 +189,147 @@ public class LoadTestPrnStateTests
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(accept, token)).StatusCode);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AllocatedNotes_LeaveMemoryWhenTheLeaseEnds_WithoutAnotherPrnRequest(bool expire)
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var runId = Guid.NewGuid();
+        await StartRun(client, runId);
+        var session = await client.PostAsJsonAsync(
+            "/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(runId, 1, 1),
+            token
+        );
+        var organisationIds = (await session.Content.ReadFromJsonAsync<LoadTestSessionResponse>(token))!
+            .Users.SelectMany(user => user.Allocations)
+            .Select(allocation => allocation.OrganisationId)
+            .ToList();
+        foreach (var organisationId in organisationIds)
+        {
+            await Search(client, "pageSize=1", organisationId);
+        }
+        var prnState = factory.Services.GetRequiredService<LoadTestPrnState>();
+        Assert.Equal(2, prnState.AllocatedOrganisationCount);
+
+        if (expire)
+        {
+            clock.Advance(120);
+            // Any call that reads the lease finds it expired; here, the next run asking for one.
+            await StartRun(client, Guid.NewGuid());
+        }
+        else
+        {
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                (await client.DeleteAsync($"/admin/load-test-runs/{runId}", token)).StatusCode
+            );
+        }
+
+        Assert.Equal(0, prnState.AllocatedOrganisationCount);
+    }
+
+    // A request that looked up its allocation before the lease ended doesn't bring the cleared notes back.
+    [Fact]
+    public async Task RequestThatStraddlesTheLeaseEnding_DoesNotRegenerateAllocatedNotes()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var runId = Guid.NewGuid();
+        await StartRun(client, runId);
+        var session = await client.PostAsJsonAsync(
+            "/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(runId, 1, 0),
+            token
+        );
+        var organisationId = (await session.Content.ReadFromJsonAsync<LoadTestSessionResponse>(token))!
+            .Users.SelectMany(user => user.Allocations)
+            .Single()
+            .OrganisationId;
+        var prnState = factory.Services.GetRequiredService<LoadTestPrnState>();
+
+        var owner = prnState.LookUp(organisationId);
+        Assert.NotNull(owner.RecipientName);
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/load-test-runs/{runId}", token)).StatusCode);
+
+        Assert.Null(prnState.Search(owner, AllNotes));
+        Assert.Equal(0, prnState.AllocatedOrganisationCount);
+    }
+
+    // A request that read the previous run, finishing after the next run has changed fixture notes,
+    // must not reset them.
+    [Fact]
+    public async Task RequestThatStraddlesARunChange_KeepsTheNewRunsFixtureNotes()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var firstRun = Guid.NewGuid();
+        await StartRun(client, firstRun);
+        var prnState = factory.Services.GetRequiredService<LoadTestPrnState>();
+        var staleOwner = prnState.LookUp(Guid.Parse(WasteOrganisationStubIds.SeededDirectProducerOrganisation));
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/load-test-runs/{firstRun}", token)).StatusCode);
+        await StartRun(client, Guid.NewGuid());
+        var note = (await Search(client, "filterBy=awaiting-all&pageSize=1")).Items.Single();
+        await Accept(client, note.ExternalId);
+
+        Assert.NotNull(prnState.Search(staleOwner, AllNotes));
+        Assert.Equal("ACCEPTED", (await Read(client, note.ExternalId)).PrnStatus);
+    }
+
+    [Fact]
+    public async Task FixtureNotes_StartAgain_WhenARunReusesItsId()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock);
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var runId = Guid.NewGuid();
+        await StartRun(client, runId);
+        var note = (await Search(client, "filterBy=awaiting-all&pageSize=1")).Items.Single();
+        await Accept(client, note.ExternalId);
+
+        Assert.Equal(HttpStatusCode.NoContent, (await client.DeleteAsync($"/admin/load-test-runs/{runId}", token)).StatusCode);
+        Assert.Equal("ACCEPTED", (await Read(client, note.ExternalId)).PrnStatus);
+        await StartRun(client, runId);
+
+        Assert.Equal("AWAITINGACCEPTANCE", (await Read(client, note.ExternalId)).PrnStatus);
+    }
+
+    private static readonly PrnSearchQuery AllNotes = new(1, 10, null, null, null, null);
+
+    private static async Task Accept(HttpClient client, Guid prnId)
+    {
+        using var accept = new HttpRequestMessage(HttpMethod.Post, $"{Base}/status")
+        {
+            Content = JsonContent.Create(new[] { new { prnId, status = "ACCEPTED" } }),
+        };
+        accept.Headers.Add(OrganisationHeader, WasteOrganisationStubIds.SeededDirectProducerOrganisation);
+        accept.Headers.Add("X-EPR-USER", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(accept, TestContext.Current.CancellationToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task AwaitingPaperFiber_MatchesPaperAndFibre_AsTheBackendDoes()
+    {
+        using var factory = Factory(new MutableTimeProvider(BeforeChoiceWindow));
+        using var client = factory.CreateClient();
+
+        var paper = await Search(client, "filterBy=awaiting-paperfiber&pageSize=10000");
+        var materials = paper.Items.Select(prn => prn.MaterialName).Distinct().Order().ToList();
+
+        Assert.Equal(["Fibre", "Paper/board"], materials);
+        Assert.All(paper.Items, prn => Assert.Equal("AWAITINGACCEPTANCE", prn.PrnStatus));
+    }
+
     [Fact]
     public void Generate_GivesEveryBackendMaterialNotesAwaitingAcceptance()
     {
@@ -247,5 +388,12 @@ public class LoadTestPrnStateTests
 
     private sealed record SearchPage(IReadOnlyList<Prn> Items, int TotalItems);
 
-    private sealed record Prn(Guid ExternalId, string PrnNumber, string PrnStatus, bool DecemberWaste, string ObligationYear);
+    private sealed record Prn(
+        Guid ExternalId,
+        string PrnNumber,
+        string PrnStatus,
+        bool DecemberWaste,
+        string ObligationYear,
+        string MaterialName
+    );
 }
