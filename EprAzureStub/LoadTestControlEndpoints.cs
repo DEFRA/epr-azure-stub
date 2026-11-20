@@ -14,9 +14,9 @@ public static class LoadTestControlEndpoints
         "browser-load",
         "unsubmitted",
         "unsubmitted-journey",
-        "prns",
-        "prns-lighthouse",
-        "prns-browser-load",
+        "prn-obligations",
+        "prn-obligations-lighthouse",
+        "prn-obligations-browser-load",
     ];
 
     public static void MapLoadTestControlEndpoints(this IEndpointRouteBuilder app)

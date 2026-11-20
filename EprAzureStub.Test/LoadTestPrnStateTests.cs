@@ -102,9 +102,9 @@ public class LoadTestPrnStateTests
     }
 
     [Theory]
-    [InlineData("prns")]
-    [InlineData("prns-lighthouse")]
-    [InlineData("prns-browser-load")]
+    [InlineData("prn-obligations")]
+    [InlineData("prn-obligations-lighthouse")]
+    [InlineData("prn-obligations-browser-load")]
     public async Task RunLease_AcceptsThePrnPerformanceProfiles(string profile)
     {
         using var factory = Factory(new MutableTimeProvider(DecemberChoiceWindow));
@@ -357,7 +357,7 @@ public class LoadTestPrnStateTests
     {
         var lease = await client.PostAsJsonAsync(
             "/admin/load-test-runs",
-            new LoadTestRunLeaseRequest(runId, "prns", 60),
+            new LoadTestRunLeaseRequest(runId, "prn-obligations", 60),
             TestContext.Current.CancellationToken
         );
         Assert.Equal(HttpStatusCode.Created, lease.StatusCode);
