@@ -85,7 +85,23 @@ public class LoadTestPrnStateTests
             Assert.All(prns, prn => Assert.Matches(new Regex(@"^E[RX]\d{8}$"), prn.PrnNumber));
             Assert.Equal(prns.Count, prns.Select(prn => prn.PrnNumber).Distinct().Count());
             Assert.Equal(prns.Count, prns.Select(prn => prn.ExternalId).Distinct().Count());
+            // The frontend's rule for a PRN ID: Joi.string().guid({ version: ['uuidv4', 'uuidv5'] }).
+            Assert.All(prns, prn => Assert.Matches(FrontendPrnId, prn.ExternalId.ToString("D")));
         }
+    }
+
+    private static readonly Regex FrontendPrnId =
+        new("^[0-9a-f]{8}-[0-9a-f]{4}-[45][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$");
+
+    [Fact]
+    public void Generate_GivesTheSameIdsOnEveryCall()
+    {
+        var organisationId = Guid.NewGuid();
+
+        Assert.Equal(
+            LoadTestPrnState.Generate(organisationId, "Organisation", 100, DecemberChoiceWindow).Select(prn => prn.ExternalId),
+            LoadTestPrnState.Generate(organisationId, "Organisation", 100, DecemberChoiceWindow).Select(prn => prn.ExternalId)
+        );
     }
 
     [Fact]
