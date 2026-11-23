@@ -32,6 +32,9 @@ Endpoints to replicate are:
   - Search follows the backend's `Repository.GetSearchPrnsForOrganisation` (filters, sorts, paging) and its
     `PaginatedRequestDtoValidator`: 401 without an organisation, 400 for `acceptableIntoYear` outside 2023-2050
   - `PrnAcceptanceYearRule` is a copy of the backend's `AcceptanceYearRule`; change both together
+  - Generated IDs must be valid version 4 or 5 UUIDs with the RFC 4122 variant: the frontend validates IDs in
+    its URLs with `Joi.string().guid({ version: ['uuidv4', 'uuidv5'] })` and returns 400 for anything else.
+    A hash cut to 16 bytes is not enough; set the version and variant bits (see `LoadTestPrnState.DeterministicGuid`)
   - Generated data uses every value the upstream stores: take lists such as materials from the upstream
     constants (`PrnConstants.Materials`), or say in the README which values are left out and why. Check that
     each value can still reach every status: values chosen by `index % n` alongside other `index % n` fields

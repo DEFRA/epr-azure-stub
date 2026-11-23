@@ -451,8 +451,16 @@ public sealed class LoadTestPrnState
         return issueDate > latest ? latest : issueDate;
     }
 
-    private static Guid DeterministicGuid(string value) =>
-        new(SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16));
+    // A name-based (version 5 layout) UUID: the same value always gives the same ID. The frontend
+    // rejects a PRN ID that isn't a version 4 or 5 UUID with the RFC 4122 variant, so set both.
+    internal static Guid DeterministicGuid(string value)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(value)).AsSpan(0, 16).ToArray();
+        bytes[6] = (byte)((bytes[6] & 0x0F) | 0x50);
+        bytes[8] = (byte)((bytes[8] & 0x3F) | 0x80);
+
+        return new Guid(bytes, bigEndian: true);
+    }
 
     internal sealed class StubPrn
     {
