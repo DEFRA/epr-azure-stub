@@ -89,6 +89,13 @@ public sealed class LoadTestPrnState
         WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid,
     ];
 
+    private static readonly HashSet<Guid> FixtureComplianceSchemeIds =
+    [
+        WasteOrganisationStubIds.ComplianceSchemeGuid,
+        WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid,
+        WasteOrganisationStubIds.SeededComplianceSchemeExternalIdGuid,
+    ];
+
     private readonly Lock _sync = new();
     // Fixture organisations aren't allocations: their notes outlast a lease and start again with a new run.
     private readonly Dictionary<Guid, List<StubPrn>> _fixturePrns = [];
@@ -283,6 +290,7 @@ public sealed class LoadTestPrnState
     internal readonly record struct NotesOwner(
         Guid OrganisationId,
         bool IsFixture,
+        bool IsComplianceScheme,
         string? RecipientName,
         Guid? ActiveRunId,
         int RunsEnded
@@ -297,14 +305,29 @@ public sealed class LoadTestPrnState
 
         if (FixtureOrganisationIds.Contains(organisationId))
         {
-            return new NotesOwner(organisationId, true, "Stub organisation", activeRunId, runsEnded);
+            return new NotesOwner(
+                organisationId,
+                true,
+                FixtureComplianceSchemeIds.Contains(organisationId),
+                "Stub organisation",
+                activeRunId,
+                runsEnded
+            );
         }
 
-        var recipientName = loadTestSessionState.TryGetAllocationForOrganisation(organisationId, out var allocation)
-            ? allocation.ComplianceSchemeName ?? allocation.OrganisationName
-            : null;
+        if (!loadTestSessionState.TryGetAllocationForOrganisation(organisationId, out var allocation))
+        {
+            return new NotesOwner(organisationId, false, false, null, activeRunId, runsEnded);
+        }
 
-        return new NotesOwner(organisationId, false, recipientName, activeRunId, runsEnded);
+        return new NotesOwner(
+            organisationId,
+            false,
+            allocation.IsComplianceScheme,
+            allocation.ComplianceSchemeName ?? allocation.OrganisationName,
+            activeRunId,
+            runsEnded
+        );
     }
 
     // Called under _sync.
@@ -323,7 +346,7 @@ public sealed class LoadTestPrnState
 
         if (owner.IsFixture)
         {
-            return GetOrGenerate(_fixturePrns, owner.OrganisationId, owner.RecipientName!);
+            return GetOrGenerate(_fixturePrns, owner, owner.RecipientName!);
         }
 
         // No allocation, or its lease ended after the lookup and its notes were cleared: don't bring them back.
@@ -332,7 +355,7 @@ public sealed class LoadTestPrnState
             return null;
         }
 
-        return GetOrGenerate(_allocatedPrns, owner.OrganisationId, owner.RecipientName);
+        return GetOrGenerate(_allocatedPrns, owner, owner.RecipientName);
     }
 
     // Raised by the session when a lease is released or expires: the run's allocations are gone from
@@ -359,16 +382,21 @@ public sealed class LoadTestPrnState
         }
     }
 
-    private List<StubPrn> GetOrGenerate(Dictionary<Guid, List<StubPrn>> store, Guid organisationId, string recipientName)
+    private List<StubPrn> GetOrGenerate(Dictionary<Guid, List<StubPrn>> store, NotesOwner owner, string recipientName)
     {
-        if (!store.TryGetValue(organisationId, out var prns))
+        if (!store.TryGetValue(owner.OrganisationId, out var prns))
         {
-            prns = Generate(organisationId, recipientName, options.Value.PrnsPerOrganisation, timeProvider.GetUtcNow());
-            store[organisationId] = prns;
+            prns = Generate(owner.OrganisationId, recipientName, NotesFor(owner), timeProvider.GetUtcNow());
+            store[owner.OrganisationId] = prns;
         }
 
         return prns;
     }
+
+    private int NotesFor(NotesOwner owner) =>
+        owner.IsComplianceScheme
+            ? options.Value.PrnsPerComplianceScheme ?? options.Value.PrnsPerOrganisation
+            : options.Value.PrnsPerOrganisation;
 
     /// <summary>
     /// Every material, PRNs and PERNs, mostly awaiting acceptance with some accepted, rejected and

@@ -103,6 +103,8 @@ every material the backend stores (including Fibre, Paper Composting and Wood
 Composting), PRNs and PERNs, mostly awaiting acceptance, some December waste.
 About 650 of each organisation's 1000 notes can be accepted into the current year;
 set the option from the planned users, iterations and notes used per iteration.
+`LoadTest:PrnsPerComplianceScheme`, when set, replaces it for compliance schemes
+(allocated and fixture), so schemes can have more notes than direct producers.
 They are generated from the organisation ID on first use and generated again when a
 new run lease starts, so each run starts with the same notes awaiting acceptance. When
 the lease is released or expires, an allocated organisation's notes go with its
