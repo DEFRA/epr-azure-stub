@@ -12,4 +12,9 @@ public sealed record LoadTestOptions
     // each account needs enough awaiting acceptance for a whole run.
     [Range(1, 10_000)]
     public int PrnsPerOrganisation { get; init; } = 1_000;
+
+    // PRNs and PERNs generated for each compliance scheme, allocated or fixture, when set; otherwise
+    // PrnsPerOrganisation. Lets a run give schemes more notes than direct producers.
+    [Range(1, 10_000)]
+    public int? PrnsPerComplianceScheme { get; init; }
 }

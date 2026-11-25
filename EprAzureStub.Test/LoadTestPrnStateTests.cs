@@ -347,6 +347,47 @@ public class LoadTestPrnStateTests
     }
 
     [Fact]
+    public async Task ComplianceSchemes_GetPrnsPerComplianceScheme_AndDirectProducersPrnsPerOrganisation()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock, new LoadTestOptions { PrnsPerOrganisation = 100, PrnsPerComplianceScheme = 150 });
+        using var client = factory.CreateClient();
+        var token = TestContext.Current.CancellationToken;
+        var runId = Guid.NewGuid();
+        await StartRun(client, runId);
+        var session = await client.PostAsJsonAsync(
+            "/admin/load-test-sessions",
+            new LoadTestSessionInitialisationRequest(runId, 1, 1),
+            token
+        );
+        var allocations = (await session.Content.ReadFromJsonAsync<LoadTestSessionResponse>(token))!
+            .Users.SelectMany(user => user.Allocations)
+            .ToList();
+
+        Assert.Equal(100, (await Search(client, "", allocations.Single(a => !a.IsComplianceScheme).OrganisationId)).TotalItems);
+        Assert.Equal(150, (await Search(client, "", allocations.Single(a => a.IsComplianceScheme).OrganisationId)).TotalItems);
+        Assert.Equal(100, (await Search(client, "")).TotalItems);
+        Assert.Equal(
+            150,
+            (await Search(client, "", WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)).TotalItems
+        );
+    }
+
+    [Fact]
+    public async Task ComplianceSchemes_GetPrnsPerOrganisation_WhenPrnsPerComplianceSchemeIsNotSet()
+    {
+        var clock = new MutableTimeProvider(new DateTimeOffset(2026, 11, 16, 12, 0, 0, TimeSpan.Zero));
+        using var factory = Factory(clock, new LoadTestOptions { PrnsPerOrganisation = 100 });
+        using var client = factory.CreateClient();
+        await StartRun(client, Guid.NewGuid());
+
+        Assert.Equal(
+            100,
+            (await Search(client, "", WasteOrganisationStubIds.SeededComplianceSchemeOrganisationGuid)).TotalItems
+        );
+    }
+
+    [Fact]
     public void Generate_GivesEveryBackendMaterialNotesAwaitingAcceptance()
     {
         var prns = LoadTestPrnState.Generate(Guid.NewGuid(), "Organisation", 1000, BeforeChoiceWindow);
@@ -362,11 +403,16 @@ public class LoadTestPrnStateTests
         );
     }
 
-    private static WebApplicationFactory<Program> Factory(TimeProvider clock) =>
+    private static WebApplicationFactory<Program> Factory(TimeProvider clock, LoadTestOptions? options = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder.ConfigureServices(services =>
         {
             services.RemoveAll<TimeProvider>();
             services.AddSingleton(clock);
+
+            if (options is not null)
+            {
+                services.AddSingleton(Microsoft.Extensions.Options.Options.Create(options));
+            }
         }));
 
     private static async Task StartRun(HttpClient client, Guid runId)
